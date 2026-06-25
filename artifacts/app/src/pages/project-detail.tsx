@@ -146,7 +146,7 @@ export default function ProjectDetail() {
     : null;
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 overflow-hidden">
       <div className="px-4 md:px-6 pt-4 md:pt-6 pb-3 border-b border-border shrink-0">
         <div className="flex items-start justify-between gap-3 max-w-full">
           <div className="flex items-start gap-2 min-w-0">
@@ -255,7 +255,7 @@ export default function ProjectDetail() {
         )}
       </div>
 
-      <div className="flex-1 flex overflow-hidden" data-testid="map-area">
+      <div className="flex-1 min-h-0 flex overflow-hidden" data-testid="map-area">
         <div className={cn("relative overflow-hidden transition-all duration-300", selectedNode ? "flex-1 hidden md:block" : "flex-1")}>
           {isGenerating ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/80 backdrop-blur-sm z-10">
@@ -316,7 +316,7 @@ export default function ProjectDetail() {
         {selectedNode && (
           <div
             className={cn(
-              "border-l border-border flex flex-col overflow-hidden",
+              "border-l border-border flex flex-col min-h-0 overflow-hidden",
               "w-full md:w-[420px] lg:w-[460px]"
             )}
             data-testid="chat-panel"
