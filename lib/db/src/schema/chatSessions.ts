@@ -6,8 +6,8 @@ export const chatSessionsTable = pgTable("chat_sessions", {
   id: serial("id").primaryKey(),
   nodeId: integer("node_id").notNull().unique(),
   messages: jsonb("messages").notNull().default([]),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow().$onUpdate(() => new Date().toISOString()),
 });
 
 export const chatMessagesTable = pgTable("chat_messages", {
@@ -15,7 +15,7 @@ export const chatMessagesTable = pgTable("chat_messages", {
   sessionId: integer("session_id").notNull(),
   role: text("role").notNull(),
   content: text("content").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
 });
 
 export const insertChatSessionSchema = createInsertSchema(chatSessionsTable).omit({ id: true, createdAt: true, updatedAt: true });

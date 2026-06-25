@@ -6,8 +6,8 @@ export const nodeMapsTable = pgTable("node_maps", {
   id: serial("id").primaryKey(),
   projectId: integer("project_id").notNull().unique(),
   rawJson: text("raw_json"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow().$onUpdate(() => new Date().toISOString()),
 });
 
 export const nodesTable = pgTable("nodes", {
@@ -20,15 +20,15 @@ export const nodesTable = pgTable("nodes", {
   summary: text("summary"),
   positionX: real("position_x"),
   positionY: real("position_y"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow().$onUpdate(() => new Date().toISOString()),
 });
 
 export const nodeEdgesTable = pgTable("node_edges", {
   id: serial("id").primaryKey(),
   fromNodeId: integer("from_node_id").notNull(),
   toNodeId: integer("to_node_id").notNull(),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
 });
 
 export const insertNodeMapSchema = createInsertSchema(nodeMapsTable).omit({ id: true, createdAt: true, updatedAt: true });
