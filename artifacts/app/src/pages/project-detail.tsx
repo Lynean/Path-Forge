@@ -1,93 +1,228 @@
-import { useRoute } from "wouter";
-import { useGetProject, useGetNodeMap, useGetProjectStats, getGetProjectQueryKey, getGetProjectStatsQueryKey, getGetNodeMapQueryKey } from "@workspace/api-client-react";
+import { useState } from "react";
+import { useRoute, useLocation } from "wouter";
+import {
+  useGetProject,
+  useGetNodeMap,
+  useGetProjectStats,
+  useGenerateNodeMap,
+  getGetProjectQueryKey,
+  getGetProjectStatsQueryKey,
+  getGetNodeMapQueryKey,
+} from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Progress } from "@/components/ui/progress";
+import { NodeMapCanvas } from "@/components/node-map-canvas";
+import { Sparkles, RefreshCw, AlertCircle } from "lucide-react";
 
 export default function ProjectDetail() {
   const [match, params] = useRoute("/projects/:projectId");
   const projectId = match ? parseInt(params.projectId, 10) : 0;
+  const queryClient = useQueryClient();
+  const [, setLocation] = useLocation();
 
-  const { data: project, isLoading: projectLoading } = useGetProject(projectId, { query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId) } });
-  const { data: stats } = useGetProjectStats(projectId, { query: { enabled: !!projectId, queryKey: getGetProjectStatsQueryKey(projectId) } });
-  const { data: map, isLoading: mapLoading } = useGetNodeMap(projectId, { query: { enabled: !!projectId, queryKey: getGetNodeMapQueryKey(projectId) } });
+  const { data: project, isLoading: projectLoading } = useGetProject(projectId, {
+    query: { enabled: !!projectId, queryKey: getGetProjectQueryKey(projectId) },
+  });
+  const { data: stats } = useGetProjectStats(projectId, {
+    query: { enabled: !!projectId, queryKey: getGetProjectStatsQueryKey(projectId) },
+  });
+  const { data: map, isLoading: mapLoading, error: mapError } = useGetNodeMap(projectId, {
+    query: { enabled: !!projectId, queryKey: getGetNodeMapQueryKey(projectId) },
+  });
+
+  const generateMap = useGenerateNodeMap({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getGetNodeMapQueryKey(projectId) });
+        queryClient.invalidateQueries({ queryKey: getGetProjectStatsQueryKey(projectId) });
+        queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+      },
+    },
+  });
+
+  const handleGenerate = () => {
+    generateMap.mutate({ projectId });
+  };
 
   if (projectLoading) {
     return (
-      <div className="p-6 md:p-10 max-w-6xl mx-auto space-y-6">
+      <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-6">
         <Skeleton className="h-10 w-1/3" />
-        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-6 w-2/3" />
+        <Skeleton className="h-[60vh] w-full" />
       </div>
     );
   }
 
-  if (!project) return null;
+  if (!project) {
+    return (
+      <div className="flex items-center justify-center h-full p-10">
+        <div className="text-center space-y-3">
+          <AlertCircle className="w-12 h-12 text-destructive mx-auto" />
+          <p className="text-muted-foreground">Project not found.</p>
+          <Button variant="outline" onClick={() => setLocation("/projects")}>
+            Back to projects
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  const hasMap = map && map.nodes && map.nodes.length > 0;
+  const isGenerating = generateMap.isPending;
 
   return (
-    <div className="p-6 md:p-10 max-w-6xl mx-auto flex flex-col h-full gap-6">
-      <header className="flex items-start justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-3 mb-2">
-            <h1 className="text-3xl font-mono font-bold tracking-tight">{project.title}</h1>
-            <Badge variant={project.status === 'completed' ? 'default' : 'secondary'} className="uppercase text-[10px] tracking-wider">
-              {project.status}
-            </Badge>
+    <div className="flex flex-col h-full overflow-hidden">
+      <div className="px-6 md:px-10 pt-6 md:pt-8 pb-4 border-b border-border shrink-0">
+        <div className="flex items-start justify-between gap-4 max-w-7xl mx-auto">
+          <div className="min-w-0">
+            <div className="flex items-center gap-3 mb-1.5">
+              <h1
+                className="text-2xl font-mono font-bold tracking-tight truncate"
+                data-testid="project-title"
+              >
+                {project.title}
+              </h1>
+              <Badge
+                variant={project.status === "completed" ? "default" : "secondary"}
+                className="uppercase text-[10px] tracking-wider shrink-0"
+                data-testid="project-status"
+              >
+                {project.status}
+              </Badge>
+            </div>
+            <p className="text-sm text-muted-foreground max-w-2xl line-clamp-2">
+              {project.ideaPrompt}
+            </p>
           </div>
-          <p className="text-muted-foreground max-w-3xl">{project.ideaPrompt}</p>
-        </div>
-        {stats && (
-          <div className="text-right flex flex-col items-end">
-            <div className="text-3xl font-mono">{stats.progressPercent}%</div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wider">{stats.completedNodes} / {stats.totalNodes} Nodes</div>
-          </div>
-        )}
-      </header>
 
-      <div className="flex-1 min-h-[400px] border rounded-xl bg-card relative overflow-hidden flex flex-col">
-        {mapLoading ? (
-          <div className="flex items-center justify-center h-full w-full">
-            <div className="animate-pulse flex flex-col items-center">
-              <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin mb-4" />
-              <p className="text-muted-foreground font-mono text-sm">Loading map...</p>
-            </div>
-          </div>
-        ) : map?.nodes?.length ? (
-          <div className="p-6 flex flex-col gap-4 overflow-y-auto h-full">
-            {/* List representation of nodes for Task 1 */}
-            {['available', 'locked', 'completed'].map(status => {
-              const statusNodes = map.nodes.filter(n => n.status === status);
-              if (!statusNodes.length) return null;
-              return (
-                <div key={status} className="space-y-3">
-                  <h3 className="font-mono text-sm uppercase tracking-widest text-muted-foreground">{status}</h3>
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {statusNodes.map(node => (
-                      <Card key={node.id} className={`border ${node.status === 'completed' ? 'border-primary/50 bg-primary/5' : node.status === 'locked' ? 'opacity-50' : ''}`}>
-                        <CardHeader className="py-3 px-4">
-                          <CardTitle className="text-base font-mono">{node.title}</CardTitle>
-                        </CardHeader>
-                        <CardContent className="py-3 px-4 pt-0">
-                          <p className="text-sm text-muted-foreground">{node.brief}</p>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
+          <div className="flex items-center gap-3 shrink-0">
+            {stats && hasMap && (
+              <div className="text-right hidden sm:block">
+                <div className="text-2xl font-mono font-bold" data-testid="progress-percent">
+                  {stats.progressPercent}%
                 </div>
-              );
-            })}
+                <div className="text-xs text-muted-foreground uppercase tracking-wider">
+                  {stats.completedNodes} / {stats.totalNodes} nodes
+                </div>
+              </div>
+            )}
+            {hasMap ? (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                data-testid="button-regenerate-map"
+                className="font-mono"
+              >
+                {isGenerating ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2" />
+                    Regenerate
+                  </>
+                )}
+              </Button>
+            ) : (
+              <Button
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                data-testid="button-generate-map"
+                className="font-mono"
+              >
+                {isGenerating ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    Generate Map
+                  </>
+                )}
+              </Button>
+            )}
           </div>
-        ) : (
-          <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
-            <div className="max-w-md space-y-4">
-              <h3 className="text-xl font-bold font-mono">Map Not Generated</h3>
-              <p className="text-muted-foreground">
-                Generate your learning path to get started. The AI will break down your project idea into a sequence of actionable learning nodes.
-              </p>
-              <Button size="lg" className="font-mono mt-4">Generate Map</Button>
-            </div>
+        </div>
+
+        {stats && hasMap && (
+          <div className="mt-3 max-w-7xl mx-auto">
+            <Progress
+              value={stats.progressPercent}
+              className="h-1.5"
+              data-testid="progress-bar"
+            />
           </div>
         )}
+      </div>
+
+      <div className="flex-1 relative overflow-hidden" data-testid="map-area">
+        {isGenerating ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/80 backdrop-blur-sm z-10">
+            <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+            <div className="text-center space-y-1">
+              <p className="font-mono font-semibold">Generating your learning path</p>
+              <p className="text-sm text-muted-foreground">
+                AI is personalizing your node map...
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {generateMap.error && !isGenerating ? (
+          <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+            <div className="bg-destructive/10 border border-destructive/30 rounded-xl px-6 py-4 text-center max-w-sm">
+              <AlertCircle className="w-8 h-8 text-destructive mx-auto mb-2" />
+              <p className="text-sm font-mono text-destructive">
+                Generation failed. Try again.
+              </p>
+            </div>
+          </div>
+        ) : null}
+
+        {mapLoading && !isGenerating ? (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="w-8 h-8 border-4 border-primary border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : hasMap ? (
+          <NodeMapCanvas
+            apiNodes={map.nodes}
+            apiEdges={map.edges}
+            projectId={projectId}
+          />
+        ) : !isGenerating ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-8">
+            <div className="max-w-md space-y-4">
+              <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mx-auto">
+                <Sparkles className="w-8 h-8 text-primary" />
+              </div>
+              <h3 className="text-xl font-bold font-mono">No learning path yet</h3>
+              <p className="text-muted-foreground text-sm leading-relaxed">
+                Let the AI analyze your project idea and generate a personalized node
+                map — a sequence of learning steps tailored to your background.
+              </p>
+              <Button
+                size="lg"
+                onClick={handleGenerate}
+                disabled={isGenerating}
+                data-testid="button-generate-map-empty"
+                className="font-mono mt-2"
+              >
+                <Sparkles className="w-4 h-4 mr-2" />
+                Generate Learning Path
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </div>
     </div>
   );

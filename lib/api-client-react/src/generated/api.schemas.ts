@@ -128,3 +128,80 @@ export interface NodeMap {
   edges: NodeEdge[];
 }
 
+export type NodeStatusUpdateStatus = typeof NodeStatusUpdateStatus[keyof typeof NodeStatusUpdateStatus];
+
+
+export const NodeStatusUpdateStatus = {
+  available: 'available',
+  completed: 'completed',
+} as const;
+
+export interface NodeStatusUpdate {
+  status: NodeStatusUpdateStatus;
+}
+
+export type NodeChatMessageRole = typeof NodeChatMessageRole[keyof typeof NodeChatMessageRole];
+
+
+export const NodeChatMessageRole = {
+  user: 'user',
+  assistant: 'assistant',
+} as const;
+
+export interface NodeChatMessage {
+  role: NodeChatMessageRole;
+  content: string;
+  createdAt: string;
+}
+
+export interface NodeChatHistory {
+  nodeId: number;
+  messages: NodeChatMessage[];
+}
+
+export interface NodeChatMessageInput {
+  /** @minLength 1 */
+  content: string;
+}
+
+export interface SpawnNodeInput {
+  /**
+     * Topic or reason for the extra node to spawn
+     * @minLength 1
+     */
+  topic: string;
+}
+
+export interface OpenrouterConversation {
+  id: number;
+  title: string;
+  createdAt: string;
+}
+
+export interface OpenrouterMessage {
+  id: number;
+  conversationId: number;
+  role: string;
+  content: string;
+  createdAt: string;
+}
+
+export interface OpenrouterConversationInput {
+  title: string;
+}
+
+export interface OpenrouterMessageInput {
+  content: string;
+}
+
+export interface OpenrouterConversationWithMessages {
+  id: number;
+  title: string;
+  createdAt: string;
+  messages: OpenrouterMessage[];
+}
+
+export interface OpenrouterError {
+  error: string;
+}
+

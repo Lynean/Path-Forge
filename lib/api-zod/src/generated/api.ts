@@ -161,6 +161,36 @@ export const DeleteProjectResponse = zod.void()
 
 
 /**
+ * Calls the AI to generate a personalized learning node map based on the project idea and learner profile
+ * @summary Generate AI node map for a project
+ */
+export const GenerateNodeMapParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const GenerateNodeMapResponse = zod.object({
+  "projectId": zod.number(),
+  "nodes": zod.array(zod.object({
+  "id": zod.number(),
+  "mapId": zod.number(),
+  "title": zod.string(),
+  "brief": zod.string(),
+  "status": zod.enum(['locked', 'available', 'completed']),
+  "isExtra": zod.boolean(),
+  "summary": zod.string().nullish(),
+  "positionX": zod.number().nullish(),
+  "positionY": zod.number().nullish(),
+  "createdAt": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.number(),
+  "fromNodeId": zod.number(),
+  "toNodeId": zod.number()
+}))
+})
+
+
+/**
  * @summary Get the node map for a project
  */
 export const GetNodeMapParams = zod.object({
@@ -204,5 +234,199 @@ export const GetProjectStatsResponse = zod.object({
   "extraNodes": zod.number(),
   "progressPercent": zod.number()
 })
+
+
+/**
+ * @summary Get chat history for a node
+ */
+export const GetNodeChatParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "nodeId": zod.coerce.number()
+})
+
+export const GetNodeChatResponse = zod.object({
+  "nodeId": zod.number(),
+  "messages": zod.array(zod.object({
+  "role": zod.enum(['user', 'assistant']),
+  "content": zod.string(),
+  "createdAt": zod.string()
+}))
+})
+
+
+/**
+ * @summary Send a message to the node AI tutor (streaming SSE)
+ */
+export const SendNodeChatMessageParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "nodeId": zod.coerce.number()
+})
+
+
+
+
+export const SendNodeChatMessageBody = zod.object({
+  "content": zod.string().min(1)
+})
+
+export const SendNodeChatMessageResponse = zod.unknown()
+
+
+/**
+ * @summary Spawn extra learning node from chat context
+ */
+export const SpawnExtraNodeParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "nodeId": zod.coerce.number()
+})
+
+
+
+
+export const SpawnExtraNodeBody = zod.object({
+  "topic": zod.string().min(1).describe('Topic or reason for the extra node to spawn')
+})
+
+export const SpawnExtraNodeResponse = zod.object({
+  "projectId": zod.number(),
+  "nodes": zod.array(zod.object({
+  "id": zod.number(),
+  "mapId": zod.number(),
+  "title": zod.string(),
+  "brief": zod.string(),
+  "status": zod.enum(['locked', 'available', 'completed']),
+  "isExtra": zod.boolean(),
+  "summary": zod.string().nullish(),
+  "positionX": zod.number().nullish(),
+  "positionY": zod.number().nullish(),
+  "createdAt": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.number(),
+  "fromNodeId": zod.number(),
+  "toNodeId": zod.number()
+}))
+})
+
+
+/**
+ * @summary Update node status (e.g. mark completed)
+ */
+export const UpdateNodeStatusParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "nodeId": zod.coerce.number()
+})
+
+export const UpdateNodeStatusBody = zod.object({
+  "status": zod.enum(['available', 'completed'])
+})
+
+export const UpdateNodeStatusResponse = zod.object({
+  "projectId": zod.number(),
+  "nodes": zod.array(zod.object({
+  "id": zod.number(),
+  "mapId": zod.number(),
+  "title": zod.string(),
+  "brief": zod.string(),
+  "status": zod.enum(['locked', 'available', 'completed']),
+  "isExtra": zod.boolean(),
+  "summary": zod.string().nullish(),
+  "positionX": zod.number().nullish(),
+  "positionY": zod.number().nullish(),
+  "createdAt": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.number(),
+  "fromNodeId": zod.number(),
+  "toNodeId": zod.number()
+}))
+})
+
+
+/**
+ * @summary List all conversations
+ */
+export const ListOpenrouterConversationsResponseItem = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+export const ListOpenrouterConversationsResponse = zod.array(ListOpenrouterConversationsResponseItem)
+
+
+/**
+ * @summary Create a new conversation
+ */
+export const CreateOpenrouterConversationBody = zod.object({
+  "title": zod.string()
+})
+
+export const CreateOpenrouterConversationResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Get conversation with messages
+ */
+export const GetOpenrouterConversationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const GetOpenrouterConversationResponse = zod.object({
+  "id": zod.number(),
+  "title": zod.string(),
+  "createdAt": zod.coerce.date(),
+  "messages": zod.array(zod.object({
+  "id": zod.number(),
+  "conversationId": zod.number(),
+  "role": zod.string(),
+  "content": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Delete a conversation
+ */
+export const DeleteOpenrouterConversationParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const DeleteOpenrouterConversationResponse = zod.void()
+
+
+/**
+ * @summary List messages in a conversation
+ */
+export const ListOpenrouterMessagesParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const ListOpenrouterMessagesResponseItem = zod.object({
+  "id": zod.number(),
+  "conversationId": zod.number(),
+  "role": zod.string(),
+  "content": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+export const ListOpenrouterMessagesResponse = zod.array(ListOpenrouterMessagesResponseItem)
+
+
+/**
+ * @summary Send a message and receive an AI response (SSE stream)
+ */
+export const SendOpenrouterMessageParams = zod.object({
+  "id": zod.coerce.number()
+})
+
+export const SendOpenrouterMessageBody = zod.object({
+  "content": zod.string()
+})
+
+export const SendOpenrouterMessageResponse = zod.unknown()
 
 

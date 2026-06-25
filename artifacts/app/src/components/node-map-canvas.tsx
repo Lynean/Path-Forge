@@ -1,0 +1,234 @@
+import { useCallback, useMemo } from "react";
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  type Node,
+  type Edge,
+  type NodeTypes,
+  Handle,
+  Position,
+  MarkerType,
+  useNodesState,
+  useEdgesState,
+} from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+import { useLocation } from "wouter";
+import type { Node as ApiNode, NodeEdge } from "@workspace/api-client-react";
+import { CheckCircle, Lock, Circle } from "lucide-react";
+
+interface NodeCardProps {
+  data: {
+    node: ApiNode;
+    onClick: () => void;
+  };
+}
+
+function NodeCard({ data }: NodeCardProps) {
+  const { node, onClick } = data;
+  const isAvailable = node.status === "available";
+  const isCompleted = node.status === "completed";
+  const isLocked = node.status === "locked";
+
+  return (
+    <div
+      onClick={isAvailable || isCompleted ? onClick : undefined}
+      data-testid={`node-card-${node.id}`}
+      className={[
+        "relative w-52 rounded-xl border p-3 transition-all duration-150 select-none",
+        isAvailable
+          ? "cursor-pointer bg-card border-primary/60 shadow-lg shadow-primary/10 hover:border-primary hover:shadow-primary/20"
+          : isCompleted
+          ? "cursor-pointer bg-primary/10 border-primary/50"
+          : "cursor-not-allowed bg-muted/30 border-border/40 opacity-50",
+      ].join(" ")}
+    >
+      <Handle
+        type="target"
+        position={Position.Top}
+        className="!bg-border !border-border !w-2 !h-2"
+      />
+
+      <div className="flex items-start gap-2">
+        <div className="mt-0.5 shrink-0">
+          {isCompleted ? (
+            <CheckCircle className="w-4 h-4 text-primary" />
+          ) : isAvailable ? (
+            <Circle className="w-4 h-4 text-primary/70" />
+          ) : (
+            <Lock className="w-4 h-4 text-muted-foreground/50" />
+          )}
+        </div>
+        <div className="min-w-0">
+          <p className="text-sm font-mono font-semibold leading-tight truncate">
+            {node.title}
+          </p>
+          <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+            {node.brief}
+          </p>
+        </div>
+      </div>
+
+      <Handle
+        type="source"
+        position={Position.Bottom}
+        className="!bg-border !border-border !w-2 !h-2"
+      />
+    </div>
+  );
+}
+
+const nodeTypes: NodeTypes = { nodeCard: NodeCard };
+
+function layoutNodes(apiNodes: ApiNode[], apiEdges: NodeEdge[]): { nodes: Node[]; edges: Edge[] } {
+  const edgeMap = new Map<number, number[]>();
+  for (const edge of apiEdges) {
+    if (!edgeMap.has(edge.fromNodeId)) edgeMap.set(edge.fromNodeId, []);
+    edgeMap.get(edge.fromNodeId)!.push(edge.toNodeId);
+  }
+
+  const inDegree = new Map<number, number>(apiNodes.map((n) => [n.id, 0]));
+  for (const edge of apiEdges) {
+    inDegree.set(edge.toNodeId, (inDegree.get(edge.toNodeId) ?? 0) + 1);
+  }
+
+  const levels = new Map<number, number>();
+  const queue: number[] = [];
+  for (const [nodeId, deg] of inDegree) {
+    if (deg === 0) {
+      levels.set(nodeId, 0);
+      queue.push(nodeId);
+    }
+  }
+
+  while (queue.length > 0) {
+    const current = queue.shift()!;
+    const currentLevel = levels.get(current) ?? 0;
+    for (const successor of edgeMap.get(current) ?? []) {
+      const newLevel = currentLevel + 1;
+      if (!levels.has(successor) || levels.get(successor)! < newLevel) {
+        levels.set(successor, newLevel);
+      }
+      const updatedLevel = levels.get(successor)!;
+      if (!queue.includes(successor)) {
+        queue.push(successor);
+      }
+      levels.set(successor, Math.max(updatedLevel, newLevel));
+    }
+  }
+
+  const nodesByLevel = new Map<number, number[]>();
+  for (const [nodeId, level] of levels) {
+    if (!nodesByLevel.has(level)) nodesByLevel.set(level, []);
+    nodesByLevel.get(level)!.push(nodeId);
+  }
+
+  const nodeIdToApiNode = new Map(apiNodes.map((n) => [n.id, n]));
+  const HGAP = 240;
+  const VGAP = 160;
+
+  const flowNodes: Node[] = [];
+  for (const [level, nodeIds] of nodesByLevel) {
+    const totalWidth = (nodeIds.length - 1) * HGAP;
+    nodeIds.forEach((nodeId, i) => {
+      const apiNode = nodeIdToApiNode.get(nodeId);
+      if (!apiNode) return;
+      flowNodes.push({
+        id: String(nodeId),
+        type: "nodeCard",
+        position: {
+          x: i * HGAP - totalWidth / 2,
+          y: level * VGAP,
+        },
+        data: { node: apiNode, onClick: () => {} },
+      });
+    });
+  }
+
+  for (const apiNode of apiNodes) {
+    if (!levels.has(apiNode.id)) {
+      flowNodes.push({
+        id: String(apiNode.id),
+        type: "nodeCard",
+        position: { x: 0, y: (levels.size) * VGAP },
+        data: { node: apiNode, onClick: () => {} },
+      });
+    }
+  }
+
+  const flowEdges: Edge[] = apiEdges.map((e) => ({
+    id: `e${e.id}`,
+    source: String(e.fromNodeId),
+    target: String(e.toNodeId),
+    markerEnd: {
+      type: MarkerType.ArrowClosed,
+      color: "hsl(var(--border))",
+      width: 14,
+      height: 14,
+    },
+    style: { stroke: "hsl(var(--border))", strokeWidth: 1.5 },
+    animated: false,
+  }));
+
+  return { nodes: flowNodes, edges: flowEdges };
+}
+
+interface NodeMapCanvasProps {
+  apiNodes: ApiNode[];
+  apiEdges: NodeEdge[];
+  projectId: number;
+}
+
+export function NodeMapCanvas({ apiNodes, apiEdges, projectId }: NodeMapCanvasProps) {
+  const [, setLocation] = useLocation();
+
+  const { nodes: initialNodes, edges: initialEdges } = useMemo(
+    () => layoutNodes(apiNodes, apiEdges),
+    [apiNodes, apiEdges]
+  );
+
+  const nodesWithCallbacks = useMemo(
+    () =>
+      initialNodes.map((n) => ({
+        ...n,
+        data: {
+          ...n.data,
+          onClick: () => {
+            const apiNode = apiNodes.find((an) => an.id === parseInt(n.id, 10));
+            if (apiNode && (apiNode.status === "available" || apiNode.status === "completed")) {
+              setLocation(`/projects/${projectId}/nodes/${n.id}`);
+            }
+          },
+        },
+      })),
+    [initialNodes, apiNodes, projectId, setLocation]
+  );
+
+  const [nodes, , onNodesChange] = useNodesState(nodesWithCallbacks);
+  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+
+  return (
+    <div className="w-full h-full" data-testid="node-map-canvas">
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
+        nodeTypes={nodeTypes}
+        fitView
+        fitViewOptions={{ padding: 0.2 }}
+        minZoom={0.3}
+        maxZoom={2}
+        proOptions={{ hideAttribution: true }}
+        colorMode="dark"
+        className="bg-background"
+      >
+        <Background color="hsl(var(--border))" gap={24} size={1} />
+        <Controls
+          className="[&>button]:bg-card [&>button]:border-border [&>button]:text-foreground [&>button:hover]:bg-secondary"
+          showInteractive={false}
+        />
+      </ReactFlow>
+    </div>
+  );
+}
