@@ -3,13 +3,20 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: API specification for PathForge - project-based learning app
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: profile
+    description: Learner profile operations
+  - name: projects
+    description: Project operations
+  - name: nodemap
+    description: Node map operations
+
 paths:
   /healthz:
     get:
@@ -24,6 +31,181 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /profile:
+    get:
+      operationId: getProfile
+      tags: [profile]
+      summary: Get learner profile
+      description: Returns the authenticated learner's profile
+      responses:
+        "200":
+          description: Profile found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearnerProfile"
+        "404":
+          description: Profile not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: upsertProfile
+      tags: [profile]
+      summary: Create or update learner profile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LearnerProfileInput"
+      responses:
+        "200":
+          description: Profile saved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LearnerProfile"
+
+  /projects:
+    get:
+      operationId: listProjects
+      tags: [projects]
+      summary: List all projects for the authenticated user
+      responses:
+        "200":
+          description: List of projects
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Project"
+    post:
+      operationId: createProject
+      tags: [projects]
+      summary: Create a new project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectInput"
+      responses:
+        "201":
+          description: Project created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+
+  /projects/{projectId}:
+    get:
+      operationId: getProject
+      tags: [projects]
+      summary: Get a project by ID
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    patch:
+      operationId: updateProject
+      tags: [projects]
+      summary: Update a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectUpdate"
+      responses:
+        "200":
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Project"
+    delete:
+      operationId: deleteProject
+      tags: [projects]
+      summary: Delete a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /projects/{projectId}/map:
+    get:
+      operationId: getNodeMap
+      tags: [nodemap]
+      summary: Get the node map for a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Node map
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeMap"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/{projectId}/stats:
+    get:
+      operationId: getProjectStats
+      tags: [projects]
+      summary: Get progress stats for a project
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Project stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectStats"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +216,200 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    LearnerProfile:
+      type: object
+      properties:
+        id:
+          type: integer
+        clerkUserId:
+          type: string
+        age:
+          type: ["integer", "null"]
+        educationLevel:
+          type: ["string", "null"]
+        major:
+          type: ["string", "null"]
+        interests:
+          type: string
+        experience:
+          type: string
+        isComplete:
+          type: boolean
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - clerkUserId
+        - interests
+        - experience
+        - isComplete
+        - createdAt
+        - updatedAt
+
+    LearnerProfileInput:
+      type: object
+      properties:
+        age:
+          type: ["integer", "null"]
+        educationLevel:
+          type: ["string", "null"]
+        major:
+          type: ["string", "null"]
+        interests:
+          type: string
+        experience:
+          type: string
+        isComplete:
+          type: boolean
+      required:
+        - interests
+        - experience
+        - isComplete
+
+    Project:
+      type: object
+      properties:
+        id:
+          type: integer
+        clerkUserId:
+          type: string
+        title:
+          type: string
+        ideaPrompt:
+          type: string
+        status:
+          type: string
+          enum: [draft, active, completed]
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+      required:
+        - id
+        - clerkUserId
+        - title
+        - ideaPrompt
+        - status
+        - createdAt
+        - updatedAt
+
+    ProjectInput:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        ideaPrompt:
+          type: string
+          minLength: 1
+      required:
+        - title
+        - ideaPrompt
+
+    ProjectUpdate:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+        status:
+          type: string
+          enum: [draft, active, completed]
+
+    ProjectStats:
+      type: object
+      properties:
+        projectId:
+          type: integer
+        totalNodes:
+          type: integer
+        completedNodes:
+          type: integer
+        availableNodes:
+          type: integer
+        extraNodes:
+          type: integer
+        progressPercent:
+          type: number
+      required:
+        - projectId
+        - totalNodes
+        - completedNodes
+        - availableNodes
+        - extraNodes
+        - progressPercent
+
+    NodeMap:
+      type: object
+      properties:
+        projectId:
+          type: integer
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/Node"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/NodeEdge"
+      required:
+        - projectId
+        - nodes
+        - edges
+
+    Node:
+      type: object
+      properties:
+        id:
+          type: integer
+        mapId:
+          type: integer
+        title:
+          type: string
+        brief:
+          type: string
+        status:
+          type: string
+          enum: [locked, available, completed]
+        isExtra:
+          type: boolean
+        summary:
+          type: ["string", "null"]
+        positionX:
+          type: ["number", "null"]
+        positionY:
+          type: ["number", "null"]
+        createdAt:
+          type: string
+      required:
+        - id
+        - mapId
+        - title
+        - brief
+        - status
+        - isExtra
+        - createdAt
+
+    NodeEdge:
+      type: object
+      properties:
+        id:
+          type: integer
+        fromNodeId:
+          type: integer
+        toNodeId:
+          type: integer
+      required:
+        - id
+        - fromNodeId
+        - toNodeId
