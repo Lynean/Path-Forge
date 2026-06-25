@@ -62,6 +62,13 @@ export const UpsertProfileResponse = zod.object({
 
 
 /**
+ * Permanently deletes the authenticated learner's profile
+ * @summary Delete learner profile
+ */
+export const DeleteProfileResponse = zod.void()
+
+
+/**
  * @summary List all projects for the authenticated user
  */
 export const ListProjectsResponseItem = zod.object({

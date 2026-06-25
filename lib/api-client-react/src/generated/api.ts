@@ -284,6 +284,77 @@ export const useUpsertProfile = <TError = ErrorType<unknown>,
       return useMutation(getUpsertProfileMutationOptions(options));
     }
 
+export const getDeleteProfileUrl = () => {
+
+
+
+
+  return `/api/profile`
+}
+
+/**
+ * Permanently deletes the authenticated learner's profile
+ * @summary Delete learner profile
+ */
+export const deleteProfile = async ( options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteProfileUrl(),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteProfileMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProfile>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteProfile>>, TError,void, TContext> => {
+
+const mutationKey = ['deleteProfile'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteProfile>>, void> = () => {
+
+
+          return  deleteProfile(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteProfileMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProfile>>>
+
+    export type DeleteProfileMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Delete learner profile
+ */
+export const useDeleteProfile = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProfile>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteProfile>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getDeleteProfileMutationOptions(options));
+    }
+
 export const getListProjectsUrl = () => {
 
 

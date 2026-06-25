@@ -68,6 +68,14 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LearnerProfile"
+    delete:
+      operationId: deleteProfile
+      tags: [profile]
+      summary: Delete learner profile
+      description: Permanently deletes the authenticated learner's profile
+      responses:
+        "204":
+          description: Profile deleted
 
   /projects:
     get:

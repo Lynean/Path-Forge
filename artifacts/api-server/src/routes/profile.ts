@@ -57,4 +57,14 @@ router.put("/profile", requireAuth, async (req, res): Promise<void> => {
   res.json(UpsertProfileResponse.parse(profile));
 });
 
+router.delete("/profile", requireAuth, async (req, res): Promise<void> => {
+  const userId = getAuthUserId(req);
+
+  await db
+    .delete(learnerProfilesTable)
+    .where(eq(learnerProfilesTable.clerkUserId, userId));
+
+  res.sendStatus(204);
+});
+
 export default router;
