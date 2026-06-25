@@ -10,7 +10,7 @@ export function Layout({ children }: { children: React.ReactNode }) {
   const isNavItemActive = (path: string) => location.startsWith(path);
 
   return (
-    <div className="min-h-[100dvh] flex flex-col bg-background text-foreground">
+    <div className="h-[100dvh] flex flex-col bg-background text-foreground overflow-hidden">
       <header className="sticky top-0 z-50 flex h-14 items-center gap-4 border-b border-border bg-background px-6">
         <Link href="/projects" className="flex items-center gap-2 font-mono font-bold text-lg tracking-tight">
           PathForge
