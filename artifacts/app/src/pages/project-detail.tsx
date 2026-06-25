@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useRoute, useLocation } from "wouter";
 import {
   useGetProject,
@@ -47,6 +47,34 @@ export default function ProjectDetail() {
   const [reviseDescription, setReviseDescription] = useState("");
   const [isRevising, setIsRevising] = useState(false);
   const [reviseError, setReviseError] = useState<string | null>(null);
+
+  const [panelWidth, setPanelWidth] = useState(420);
+  const isDraggingRef = useRef(false);
+  const dragStartXRef = useRef(0);
+  const dragStartWidthRef = useRef(420);
+
+  const handleDragStart = useCallback((e: React.MouseEvent) => {
+    isDraggingRef.current = true;
+    dragStartXRef.current = e.clientX;
+    dragStartWidthRef.current = panelWidth;
+    e.preventDefault();
+  }, [panelWidth]);
+
+  useEffect(() => {
+    const onMouseMove = (e: MouseEvent) => {
+      if (!isDraggingRef.current) return;
+      const delta = dragStartXRef.current - e.clientX;
+      const next = Math.min(Math.max(dragStartWidthRef.current + delta, 300), 900);
+      setPanelWidth(next);
+    };
+    const onMouseUp = () => { isDraggingRef.current = false; };
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    return () => {
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+    };
+  }, []);
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -315,12 +343,17 @@ export default function ProjectDetail() {
 
         {selectedNode && (
           <div
-            className={cn(
-              "border-l border-border flex flex-col min-h-0 overflow-hidden",
-              "w-full md:w-[420px] lg:w-[460px]"
-            )}
+            className="border-l border-border flex flex-col min-h-0 overflow-hidden relative hidden md:flex"
+            style={{ width: panelWidth, flexShrink: 0 }}
             data-testid="chat-panel"
           >
+            <div
+              onMouseDown={handleDragStart}
+              className="absolute left-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-10 group"
+              title="Drag to resize"
+            >
+              <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full bg-border group-hover:bg-primary/50 transition-colors" />
+            </div>
             <NodeChatPanel
               key={selectedNode.id}
               projectId={projectId}

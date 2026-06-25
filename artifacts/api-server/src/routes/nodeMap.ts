@@ -268,7 +268,12 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
+
+  const heartbeat = setInterval(() => {
+    res.write(": ping\n\n");
+  }, 15000);
 
   let fullContent = "";
   try {
@@ -293,6 +298,7 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
   } catch (err: any) {
     res.write(`data: ${JSON.stringify({ error: err?.message ?? "Stream error" })}\n\n`);
   } finally {
+    clearInterval(heartbeat);
     res.end();
   }
 });
@@ -325,7 +331,12 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
   res.flushHeaders();
+
+  const heartbeat = setInterval(() => {
+    res.write(": ping\n\n");
+  }, 15000);
 
   let fullContent = "";
   try {
@@ -370,6 +381,7 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
   } catch (err: any) {
     res.write(`data: ${JSON.stringify({ type: "error", error: err?.message ?? "Stream error" })}\n\n`);
   } finally {
+    clearInterval(heartbeat);
     res.end();
   }
 });
