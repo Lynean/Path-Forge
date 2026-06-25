@@ -136,12 +136,15 @@ function HomeRedirect() {
 }
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
-  const { data: profile, isLoading } = useGetProfile();
+  const { data: profile, isLoading, error } = useGetProfile();
   const [location] = useLocation();
 
   if (isLoading) return <div className="min-h-screen bg-background" />;
-  
-  if (profile && !profile.isComplete && location !== "/onboarding") {
+
+  const profileMissing = !profile || (error && (error as any)?.response?.status === 404);
+  const profileIncomplete = profile && !profile.isComplete;
+
+  if ((profileMissing || profileIncomplete) && location !== "/onboarding") {
     return <Redirect to="/onboarding" />;
   }
 
@@ -177,7 +180,7 @@ function ClerkProviderWithRoutes() {
               <Onboarding />
             </Show>
             <Show when="signed-out">
-              <Redirect to="/" />
+              <Redirect to="/sign-in" />
             </Show>
           </Route>
 
@@ -186,7 +189,7 @@ function ClerkProviderWithRoutes() {
               <ProtectedRoute component={Projects} />
             </Show>
             <Show when="signed-out">
-              <Redirect to="/" />
+              <Redirect to="/sign-in" />
             </Show>
           </Route>
 
@@ -195,7 +198,7 @@ function ClerkProviderWithRoutes() {
               <ProtectedRoute component={ProjectDetail} />
             </Show>
             <Show when="signed-out">
-              <Redirect to="/" />
+              <Redirect to="/sign-in" />
             </Show>
           </Route>
 
