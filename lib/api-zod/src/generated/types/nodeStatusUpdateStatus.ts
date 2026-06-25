@@ -10,6 +10,5 @@ export type NodeStatusUpdateStatus = typeof NodeStatusUpdateStatus[keyof typeof 
 
 
 export const NodeStatusUpdateStatus = {
-  available: 'available',
   completed: 'completed',
 } as const;

@@ -318,7 +318,7 @@ export const UpdateNodeStatusParams = zod.object({
 })
 
 export const UpdateNodeStatusBody = zod.object({
-  "status": zod.enum(['available', 'completed'])
+  "status": zod.enum(['completed'])
 })
 
 export const UpdateNodeStatusResponse = zod.object({

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import {
   ReactFlow,
   Background,
@@ -150,7 +150,7 @@ function layoutNodes(apiNodes: ApiNode[], apiEdges: NodeEdge[]): { nodes: Node[]
       flowNodes.push({
         id: String(apiNode.id),
         type: "nodeCard",
-        position: { x: 0, y: (levels.size) * VGAP },
+        position: { x: 0, y: levels.size * VGAP },
         data: { node: apiNode, onClick: () => {} },
       });
     }
@@ -182,14 +182,14 @@ interface NodeMapCanvasProps {
 export function NodeMapCanvas({ apiNodes, apiEdges, projectId }: NodeMapCanvasProps) {
   const [, setLocation] = useLocation();
 
-  const { nodes: initialNodes, edges: initialEdges } = useMemo(
+  const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(
     () => layoutNodes(apiNodes, apiEdges),
     [apiNodes, apiEdges]
   );
 
   const nodesWithCallbacks = useMemo(
     () =>
-      initialNodes.map((n) => ({
+      layoutedNodes.map((n) => ({
         ...n,
         data: {
           ...n.data,
@@ -201,11 +201,19 @@ export function NodeMapCanvas({ apiNodes, apiEdges, projectId }: NodeMapCanvasPr
           },
         },
       })),
-    [initialNodes, apiNodes, projectId, setLocation]
+    [layoutedNodes, apiNodes, projectId, setLocation]
   );
 
-  const [nodes, , onNodesChange] = useNodesState(nodesWithCallbacks);
-  const [edges, , onEdgesChange] = useEdgesState(initialEdges);
+  const [nodes, setNodes, onNodesChange] = useNodesState(nodesWithCallbacks);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layoutedEdges);
+
+  useEffect(() => {
+    setNodes(nodesWithCallbacks);
+  }, [nodesWithCallbacks, setNodes]);
+
+  useEffect(() => {
+    setEdges(layoutedEdges);
+  }, [layoutedEdges, setEdges]);
 
   return (
     <div className="w-full h-full" data-testid="node-map-canvas">

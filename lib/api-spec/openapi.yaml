@@ -711,7 +711,7 @@ components:
       properties:
         status:
           type: string
-          enum: [available, completed]
+          enum: [completed]
       required:
         - status
 
