@@ -237,6 +237,42 @@ export const GetProjectStatsResponse = zod.object({
 
 
 /**
+ * @summary Revise future nodes using AI based on a learner direction change
+ */
+export const RevisePlanParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+
+
+
+export const RevisePlanBody = zod.object({
+  "description": zod.string().min(1).describe('Natural language description of the direction change')
+})
+
+export const RevisePlanResponse = zod.object({
+  "projectId": zod.number(),
+  "nodes": zod.array(zod.object({
+  "id": zod.number(),
+  "mapId": zod.number(),
+  "title": zod.string(),
+  "brief": zod.string(),
+  "status": zod.enum(['locked', 'available', 'completed']),
+  "isExtra": zod.boolean(),
+  "summary": zod.string().nullish(),
+  "positionX": zod.number().nullish(),
+  "positionY": zod.number().nullish(),
+  "createdAt": zod.string()
+})),
+  "edges": zod.array(zod.object({
+  "id": zod.number(),
+  "fromNodeId": zod.number(),
+  "toNodeId": zod.number()
+}))
+})
+
+
+/**
  * @summary Get chat history for a node
  */
 export const GetNodeChatParams = zod.object({
@@ -255,6 +291,7 @@ export const GetNodeChatResponse = zod.object({
 
 
 /**
+ * Streams AI response chunks. After DONE, may emit extra_node_spawned if auto-spawn triggered.
  * @summary Send a message to the node AI tutor (streaming SSE)
  */
 export const SendNodeChatMessageParams = zod.object({
@@ -270,6 +307,17 @@ export const SendNodeChatMessageBody = zod.object({
 })
 
 export const SendNodeChatMessageResponse = zod.unknown()
+
+
+/**
+ * @summary Generate and stream the AI opening message for a node (first-open only)
+ */
+export const GetNodeOpeningMessageParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "nodeId": zod.coerce.number()
+})
+
+export const GetNodeOpeningMessageResponse = zod.unknown()
 
 
 /**
@@ -310,7 +358,7 @@ export const SpawnExtraNodeResponse = zod.object({
 
 
 /**
- * @summary Update node status (e.g. mark completed)
+ * @summary Mark node as completed (with optional summary; AI-generates one if omitted)
  */
 export const UpdateNodeStatusParams = zod.object({
   "projectId": zod.coerce.number(),
@@ -318,7 +366,8 @@ export const UpdateNodeStatusParams = zod.object({
 })
 
 export const UpdateNodeStatusBody = zod.object({
-  "status": zod.enum(['completed'])
+  "status": zod.enum(['completed']),
+  "summary": zod.string().nullish().describe('Optional one-liner summary; AI generates one if omitted')
 })
 
 export const UpdateNodeStatusResponse = zod.object({
@@ -341,92 +390,5 @@ export const UpdateNodeStatusResponse = zod.object({
   "toNodeId": zod.number()
 }))
 })
-
-
-/**
- * @summary List all conversations
- */
-export const ListOpenrouterConversationsResponseItem = zod.object({
-  "id": zod.number(),
-  "title": zod.string(),
-  "createdAt": zod.coerce.date()
-})
-export const ListOpenrouterConversationsResponse = zod.array(ListOpenrouterConversationsResponseItem)
-
-
-/**
- * @summary Create a new conversation
- */
-export const CreateOpenrouterConversationBody = zod.object({
-  "title": zod.string()
-})
-
-export const CreateOpenrouterConversationResponse = zod.object({
-  "id": zod.number(),
-  "title": zod.string(),
-  "createdAt": zod.coerce.date()
-})
-
-
-/**
- * @summary Get conversation with messages
- */
-export const GetOpenrouterConversationParams = zod.object({
-  "id": zod.coerce.number()
-})
-
-export const GetOpenrouterConversationResponse = zod.object({
-  "id": zod.number(),
-  "title": zod.string(),
-  "createdAt": zod.coerce.date(),
-  "messages": zod.array(zod.object({
-  "id": zod.number(),
-  "conversationId": zod.number(),
-  "role": zod.string(),
-  "content": zod.string(),
-  "createdAt": zod.coerce.date()
-}))
-})
-
-
-/**
- * @summary Delete a conversation
- */
-export const DeleteOpenrouterConversationParams = zod.object({
-  "id": zod.coerce.number()
-})
-
-export const DeleteOpenrouterConversationResponse = zod.void()
-
-
-/**
- * @summary List messages in a conversation
- */
-export const ListOpenrouterMessagesParams = zod.object({
-  "id": zod.coerce.number()
-})
-
-export const ListOpenrouterMessagesResponseItem = zod.object({
-  "id": zod.number(),
-  "conversationId": zod.number(),
-  "role": zod.string(),
-  "content": zod.string(),
-  "createdAt": zod.coerce.date()
-})
-export const ListOpenrouterMessagesResponse = zod.array(ListOpenrouterMessagesResponseItem)
-
-
-/**
- * @summary Send a message and receive an AI response (SSE stream)
- */
-export const SendOpenrouterMessageParams = zod.object({
-  "id": zod.coerce.number()
-})
-
-export const SendOpenrouterMessageBody = zod.object({
-  "content": zod.string()
-})
-
-export const SendOpenrouterMessageResponse = zod.unknown()
 
 

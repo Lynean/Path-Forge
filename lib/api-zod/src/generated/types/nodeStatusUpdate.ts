@@ -9,4 +9,9 @@ import type { NodeStatusUpdateStatus } from './nodeStatusUpdateStatus';
 
 export interface NodeStatusUpdate {
   status: NodeStatusUpdateStatus;
+  /**
+     * Optional one-liner summary; AI generates one if omitted
+     * @nullable
+     */
+  summary?: string | null;
 }

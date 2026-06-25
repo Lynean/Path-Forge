@@ -1,0 +1,3 @@
+- [PathForge stack conventions](pathforge-stack.md) — Express 5 + Drizzle ORM (mode:"string") + PostgreSQL, React+Vite+TailwindV4+shadcn, Wouter, TanStack Query, pnpm monorepo. No console.log on server (use req.log). Express 5 async handlers return Promise<void>.
+- [PathForge API conventions](pathforge-api.md) — API base /api, codegen via `pnpm --filter @workspace/api-spec run codegen`, Zod schemas from @workspace/api-zod, OpenRouter model google/gemini-2.5-flash-lite, max_tokens 8192 (gen) / 2048 (chat).
+- [PathForge split-view routing](pathforge-routing.md) — Both /projects/:id and /projects/:id/nodes/:nodeId route to ProjectDetail; NodeDetail page is no longer routed (both go to split-view).

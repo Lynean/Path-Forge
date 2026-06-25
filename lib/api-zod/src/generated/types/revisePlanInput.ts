@@ -6,6 +6,10 @@
  * OpenAPI spec version: 0.1.0
  */
 
-export interface OpenrouterError {
-  error: string;
+export interface RevisePlanInput {
+  /**
+     * Natural language description of the direction change
+     * @minLength 1
+     */
+  description: string;
 }

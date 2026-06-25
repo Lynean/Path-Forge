@@ -137,6 +137,19 @@ export const NodeStatusUpdateStatus = {
 
 export interface NodeStatusUpdate {
   status: NodeStatusUpdateStatus;
+  /**
+     * Optional one-liner summary; AI generates one if omitted
+     * @nullable
+     */
+  summary?: string | null;
+}
+
+export interface RevisePlanInput {
+  /**
+     * Natural language description of the direction change
+     * @minLength 1
+     */
+  description: string;
 }
 
 export type NodeChatMessageRole = typeof NodeChatMessageRole[keyof typeof NodeChatMessageRole];
@@ -169,38 +182,5 @@ export interface SpawnNodeInput {
      * @minLength 1
      */
   topic: string;
-}
-
-export interface OpenrouterConversation {
-  id: number;
-  title: string;
-  createdAt: string;
-}
-
-export interface OpenrouterMessage {
-  id: number;
-  conversationId: number;
-  role: string;
-  content: string;
-  createdAt: string;
-}
-
-export interface OpenrouterConversationInput {
-  title: string;
-}
-
-export interface OpenrouterMessageInput {
-  content: string;
-}
-
-export interface OpenrouterConversationWithMessages {
-  id: number;
-  title: string;
-  createdAt: string;
-  messages: OpenrouterMessage[];
-}
-
-export interface OpenrouterError {
-  error: string;
 }
 

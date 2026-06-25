@@ -13,7 +13,6 @@ import Home from "@/pages/home";
 import Onboarding from "@/pages/onboarding";
 import Projects from "@/pages/projects";
 import ProjectDetail from "@/pages/project-detail";
-import NodeDetail from "@/pages/node-detail";
 import Profile from "@/pages/profile";
 import { Layout } from "@/components/layout";
 import { useGetProfile } from "@workspace/api-client-react";
@@ -196,7 +195,7 @@ function ClerkProviderWithRoutes() {
 
           <Route path="/projects/:projectId/nodes/:nodeId">
             <Show when="signed-in">
-              <ProtectedRoute component={NodeDetail} />
+              <ProtectedRoute component={ProjectDetail} />
             </Show>
             <Show when="signed-out">
               <Redirect to="/sign-in" />

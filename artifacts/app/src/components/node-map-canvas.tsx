@@ -15,31 +15,35 @@ import {
 import "@xyflow/react/dist/style.css";
 import { useLocation } from "wouter";
 import type { Node as ApiNode, NodeEdge } from "@workspace/api-client-react";
-import { CheckCircle, Lock, Circle } from "lucide-react";
+import { CheckCircle, Lock, Circle, Sparkles } from "lucide-react";
 
 interface NodeCardProps {
   data: {
     node: ApiNode;
+    isSelected: boolean;
     onClick: () => void;
   };
 }
 
 function NodeCard({ data }: NodeCardProps) {
-  const { node, onClick } = data;
+  const { node, onClick, isSelected } = data;
   const isAvailable = node.status === "available";
   const isCompleted = node.status === "completed";
   const isLocked = node.status === "locked";
+  const isClickable = isAvailable || isCompleted;
 
   return (
     <div
-      onClick={isAvailable || isCompleted ? onClick : undefined}
+      onClick={isClickable ? onClick : undefined}
       data-testid={`node-card-${node.id}`}
       className={[
         "relative w-52 rounded-xl border p-3 transition-all duration-150 select-none",
-        isAvailable
+        isSelected
+          ? "bg-primary/15 border-primary shadow-lg shadow-primary/25 ring-1 ring-primary"
+          : isAvailable
           ? "cursor-pointer bg-card border-primary/60 shadow-lg shadow-primary/10 hover:border-primary hover:shadow-primary/20"
           : isCompleted
-          ? "cursor-pointer bg-primary/10 border-primary/50"
+          ? "cursor-pointer bg-primary/10 border-primary/50 hover:border-primary/70"
           : "cursor-not-allowed bg-muted/30 border-border/40 opacity-50",
       ].join(" ")}
     >
@@ -63,9 +67,21 @@ function NodeCard({ data }: NodeCardProps) {
           <p className="text-sm font-mono font-semibold leading-tight truncate">
             {node.title}
           </p>
-          <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
-            {node.brief}
-          </p>
+          {node.summary ? (
+            <p className="text-xs text-primary/70 mt-1 line-clamp-1 leading-relaxed italic">
+              {node.summary}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+              {node.brief}
+            </p>
+          )}
+          {node.isExtra && (
+            <div className="flex items-center gap-0.5 mt-1">
+              <Sparkles className="w-2.5 h-2.5 text-primary/60" />
+              <span className="text-[10px] text-primary/60 font-mono">extra</span>
+            </div>
+          )}
         </div>
       </div>
 
@@ -80,7 +96,10 @@ function NodeCard({ data }: NodeCardProps) {
 
 const nodeTypes: NodeTypes = { nodeCard: NodeCard };
 
-function layoutNodes(apiNodes: ApiNode[], apiEdges: NodeEdge[]): { nodes: Node[]; edges: Edge[] } {
+function layoutNodes(
+  apiNodes: ApiNode[],
+  apiEdges: NodeEdge[]
+): { nodes: Node[]; edges: Edge[] } {
   const edgeMap = new Map<number, number[]>();
   for (const edge of apiEdges) {
     if (!edgeMap.has(edge.fromNodeId)) edgeMap.set(edge.fromNodeId, []);
@@ -140,7 +159,7 @@ function layoutNodes(apiNodes: ApiNode[], apiEdges: NodeEdge[]): { nodes: Node[]
           x: i * HGAP - totalWidth / 2,
           y: level * VGAP,
         },
-        data: { node: apiNode, onClick: () => {} },
+        data: { node: apiNode, isSelected: false, onClick: () => {} },
       });
     });
   }
@@ -151,7 +170,7 @@ function layoutNodes(apiNodes: ApiNode[], apiEdges: NodeEdge[]): { nodes: Node[]
         id: String(apiNode.id),
         type: "nodeCard",
         position: { x: 0, y: levels.size * VGAP },
-        data: { node: apiNode, onClick: () => {} },
+        data: { node: apiNode, isSelected: false, onClick: () => {} },
       });
     }
   }
@@ -177,9 +196,17 @@ interface NodeMapCanvasProps {
   apiNodes: ApiNode[];
   apiEdges: NodeEdge[];
   projectId: number;
+  selectedNodeId?: number | null;
+  onNodeClick?: (nodeId: number) => void;
 }
 
-export function NodeMapCanvas({ apiNodes, apiEdges, projectId }: NodeMapCanvasProps) {
+export function NodeMapCanvas({
+  apiNodes,
+  apiEdges,
+  projectId,
+  selectedNodeId,
+  onNodeClick,
+}: NodeMapCanvasProps) {
   const [, setLocation] = useLocation();
 
   const { nodes: layoutedNodes, edges: layoutedEdges } = useMemo(
@@ -193,15 +220,22 @@ export function NodeMapCanvas({ apiNodes, apiEdges, projectId }: NodeMapCanvasPr
         ...n,
         data: {
           ...n.data,
+          isSelected: selectedNodeId !== null && selectedNodeId !== undefined
+            ? parseInt(n.id, 10) === selectedNodeId
+            : false,
           onClick: () => {
             const apiNode = apiNodes.find((an) => an.id === parseInt(n.id, 10));
             if (apiNode && (apiNode.status === "available" || apiNode.status === "completed")) {
-              setLocation(`/projects/${projectId}/nodes/${n.id}`);
+              if (onNodeClick) {
+                onNodeClick(apiNode.id);
+              } else {
+                setLocation(`/projects/${projectId}/nodes/${n.id}`);
+              }
             }
           },
         },
       })),
-    [layoutedNodes, apiNodes, projectId, setLocation]
+    [layoutedNodes, apiNodes, projectId, setLocation, onNodeClick, selectedNodeId]
   );
 
   const [nodes, setNodes, onNodesChange] = useNodesState(nodesWithCallbacks);

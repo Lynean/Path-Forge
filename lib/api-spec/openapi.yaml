@@ -16,8 +16,6 @@ tags:
     description: Project operations
   - name: nodemap
     description: Node map operations
-  - name: openrouter
-    description: OpenRouter AI chat operations
 
 paths:
   /healthz:
@@ -248,6 +246,43 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProjectStats"
 
+  /projects/{projectId}/revise-plan:
+    post:
+      operationId: revisePlan
+      tags: [nodemap]
+      summary: Revise future nodes using AI based on a learner direction change
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RevisePlanInput"
+      responses:
+        "200":
+          description: Updated node map after revision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NodeMap"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: AI revision failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /projects/{projectId}/nodes/{nodeId}/chat:
     get:
       operationId: getNodeChat
@@ -281,6 +316,7 @@ paths:
       operationId: sendNodeChatMessage
       tags: [nodemap]
       summary: Send a message to the node AI tutor (streaming SSE)
+      description: Streams AI response chunks. After DONE, may emit extra_node_spawned if auto-spawn triggered.
       parameters:
         - name: projectId
           in: path
@@ -301,6 +337,34 @@ paths:
       responses:
         "200":
           description: SSE stream of assistant chunks
+          content:
+            text/event-stream: {}
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/{projectId}/nodes/{nodeId}/opening-message:
+    post:
+      operationId: getNodeOpeningMessage
+      tags: [nodemap]
+      summary: Generate and stream the AI opening message for a node (first-open only)
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: SSE stream of opening message chunks
           content:
             text/event-stream: {}
         "404":
@@ -350,7 +414,7 @@ paths:
     patch:
       operationId: updateNodeStatus
       tags: [nodemap]
-      summary: Update node status (e.g. mark completed)
+      summary: Mark node as completed (with optional summary; AI-generates one if omitted)
       parameters:
         - name: projectId
           in: path
@@ -370,7 +434,7 @@ paths:
               $ref: "#/components/schemas/NodeStatusUpdate"
       responses:
         "200":
-          description: Node updated; returns full updated node map (with unlocked nodes)
+          description: Node updated; returns full updated node map (with unlocked nodes and summary)
           content:
             application/json:
               schema:
@@ -381,122 +445,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
-
-  /openrouter/conversations:
-    get:
-      operationId: listOpenrouterConversations
-      tags: [openrouter]
-      summary: List all conversations
-      responses:
-        "200":
-          description: List of conversations
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/OpenrouterConversation"
-    post:
-      operationId: createOpenrouterConversation
-      tags: [openrouter]
-      summary: Create a new conversation
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OpenrouterConversationInput"
-      responses:
-        "201":
-          description: Created conversation
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OpenrouterConversation"
-  /openrouter/conversations/{id}:
-    get:
-      operationId: getOpenrouterConversation
-      tags: [openrouter]
-      summary: Get conversation with messages
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: Conversation with messages
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OpenrouterConversationWithMessages"
-        "404":
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OpenrouterError"
-    delete:
-      operationId: deleteOpenrouterConversation
-      tags: [openrouter]
-      summary: Delete a conversation
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "204":
-          description: Deleted
-        "404":
-          description: Not found
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OpenrouterError"
-  /openrouter/conversations/{id}/messages:
-    get:
-      operationId: listOpenrouterMessages
-      tags: [openrouter]
-      summary: List messages in a conversation
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      responses:
-        "200":
-          description: List of messages
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: "#/components/schemas/OpenrouterMessage"
-    post:
-      operationId: sendOpenrouterMessage
-      tags: [openrouter]
-      summary: Send a message and receive an AI response (SSE stream)
-      parameters:
-        - name: id
-          in: path
-          required: true
-          schema:
-            type: integer
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/OpenrouterMessageInput"
-      responses:
-        "200":
-          description: SSE stream of assistant response chunks
-          content:
-            text/event-stream: {}
 
 components:
   schemas:
@@ -712,8 +660,21 @@ components:
         status:
           type: string
           enum: [completed]
+        summary:
+          type: ["string", "null"]
+          description: Optional one-liner summary; AI generates one if omitted
       required:
         - status
+
+    RevisePlanInput:
+      type: object
+      properties:
+        description:
+          type: string
+          minLength: 1
+          description: Natural language description of the direction change
+      required:
+        - description
 
     NodeChatMessage:
       type: object
@@ -761,78 +722,3 @@ components:
           description: Topic or reason for the extra node to spawn
       required:
         - topic
-
-    OpenrouterConversation:
-      type: object
-      properties:
-        id:
-          type: integer
-        title:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-      required:
-        - id
-        - title
-        - createdAt
-    OpenrouterMessage:
-      type: object
-      properties:
-        id:
-          type: integer
-        conversationId:
-          type: integer
-        role:
-          type: string
-        content:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-      required:
-        - id
-        - conversationId
-        - role
-        - content
-        - createdAt
-    OpenrouterConversationInput:
-      type: object
-      properties:
-        title:
-          type: string
-      required:
-        - title
-    OpenrouterMessageInput:
-      type: object
-      properties:
-        content:
-          type: string
-      required:
-        - content
-    OpenrouterConversationWithMessages:
-      type: object
-      properties:
-        id:
-          type: integer
-        title:
-          type: string
-        createdAt:
-          type: string
-          format: date-time
-        messages:
-          type: array
-          items:
-            $ref: "#/components/schemas/OpenrouterMessage"
-      required:
-        - id
-        - title
-        - createdAt
-        - messages
-    OpenrouterError:
-      type: object
-      properties:
-        error:
-          type: string
-      required:
-        - error
