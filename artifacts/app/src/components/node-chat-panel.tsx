@@ -182,15 +182,17 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = "";
+      let buffer = "";
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        const lines = text.split("\n");
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
         for (const line of lines) {
           if (line.startsWith("data: ")) {
-            const data = line.slice(6);
+            const data = line.slice(6).trim();
             if (data === "[DONE]") continue;
             try {
               const parsed = JSON.parse(data);
@@ -273,15 +275,17 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = "";
+      let buffer = "";
 
       while (true) {
         const { value, done } = await reader.read();
         if (done) break;
-        const text = decoder.decode(value, { stream: true });
-        const lines = text.split("\n");
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
         for (const line of lines) {
           if (line.startsWith("data: ")) {
-            const data = line.slice(6);
+            const data = line.slice(6).trim();
             try {
               const parsed = JSON.parse(data);
               if (parsed.type === "chunk" && parsed.content) {
@@ -482,7 +486,7 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
         )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-3 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
         {chatLoading && !localMessagesLoaded ? (
           <div className="space-y-3 px-1">
             <Skeleton className="h-14 w-3/4" />
