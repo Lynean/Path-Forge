@@ -109,7 +109,7 @@ export async function* streamNodeChatMessage(
 
   const stream = await openrouter.chat.completions.create({
     model: MODEL,
-    max_tokens: 4096,
+    max_tokens: 16384,
     messages,
     stream: true,
   });
@@ -140,7 +140,7 @@ Keep it focused and actionable.`;
 
   const stream = await openrouter.chat.completions.create({
     model: MODEL,
-    max_tokens: 1024,
+    max_tokens: 8192,
     messages: [
       { role: "system", content: systemPrompt },
       { role: "user", content: userPrompt },
