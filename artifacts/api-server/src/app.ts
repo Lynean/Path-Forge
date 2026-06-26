@@ -48,7 +48,8 @@ app.use(
         allowedOrigins.length === 0 ||
         allowedOrigins.includes(origin) ||
         /\.replit\.dev$/.test(origin) ||
-        /\.repl\.co$/.test(origin)
+        /\.repl\.co$/.test(origin) ||
+        /\.vercel\.app$/.test(origin)
       ) {
         callback(null, true);
       } else {
