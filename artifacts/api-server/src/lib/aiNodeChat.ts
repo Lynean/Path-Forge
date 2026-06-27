@@ -1,7 +1,9 @@
 import { openrouter } from "@workspace/integrations-openrouter-ai";
-import type { LearnerProfile, Node as DbNode } from "@workspace/db";
+import type { LearnerProfile, Node as DbNode, CodeFile } from "@workspace/db";
 
 const MODEL = "google/gemini-2.5-flash-lite";
+
+export type { CodeFile };
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -12,6 +14,24 @@ export interface ChatMessage {
 interface MapContext {
   allNodes: { id: number; title: string; brief: string; status: string; summary?: string | null }[];
   allEdges: { fromNodeId: number; toNodeId: number }[];
+}
+
+function extractMinistepsFromHistory(history: ChatMessage[]): string[] {
+  const opening = history.find((m) => m.role === "assistant");
+  if (!opening) return [];
+  const lines = opening.content.split("\n");
+  const steps: string[] = [];
+  let inBlock = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\d+\.\s+\S/.test(trimmed)) {
+      steps.push(trimmed.replace(/^\d+\.\s+/, ""));
+      inBlock = true;
+    } else if (inBlock && trimmed !== "") {
+      break;
+    }
+  }
+  return steps.length >= 2 ? steps : [];
 }
 
 function buildProfileContext(profile: LearnerProfile | null): string {
@@ -27,12 +47,33 @@ function buildProfileContext(profile: LearnerProfile | null): string {
     .join("\n");
 }
 
+function buildCodeContextSection(files: CodeFile[]): string {
+  if (files.length === 0) return "No code written yet — this is the start of the project.";
+  return files.map((f) => {
+    const lastChanges = f.changeLog.slice(-3).map((c) => `  • ${c.note} (${c.reason})`).join("\n");
+    return `**${f.filename}** — ${f.description}\nRecent changes:\n${lastChanges || "  • (initial version)"}\n\`\`\`\n${f.content.slice(0, 1200)}${f.content.length > 1200 ? "\n... (truncated)" : ""}\n\`\`\``;
+  }).join("\n\n");
+}
+
+function buildSuccessorSection(nodeId: number, mapCtx: MapContext): string {
+  const successorIds = mapCtx.allEdges
+    .filter((e) => e.fromNodeId === nodeId)
+    .map((e) => e.toNodeId);
+  const successors = successorIds
+    .map((id) => mapCtx.allNodes.find((n) => n.id === id))
+    .filter(Boolean) as MapContext["allNodes"];
+  if (successors.length === 0) return "This is the final node — no further steps after this.";
+  return successors.map((n) => `- **${n.title}**: ${n.brief}`).join("\n");
+}
+
 function buildRichSystemPrompt(
   node: DbNode,
   project: { title: string; ideaPrompt: string },
   profile: LearnerProfile | null,
   mapCtx: MapContext,
-  recentConcerns: string[]
+  recentConcerns: string[],
+  codeFiles: CodeFile[],
+  history?: ChatMessage[]
 ): string {
   const profileContext = buildProfileContext(profile);
 
@@ -56,6 +97,14 @@ function buildRichSystemPrompt(
       ? recentConcerns.map((c) => `- ${c}`).join("\n")
       : "No recent concerns noted.";
 
+  const codeContextSection = buildCodeContextSection(codeFiles);
+  const successorSection = buildSuccessorSection(node.id, mapCtx);
+
+  const ministeps = history ? extractMinistepsFromHistory(history) : [];
+  const checklistSection = ministeps.length >= 2
+    ? `\n## Session Checklist\nThese are the mini-steps you defined for this session:\n${ministeps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\nTracking rule: when the learner has COMPLETED a step — meaning they've implemented it, run it, and confirmed it works — append \`[STEP_DONE:N]\` at the very end of your response (N = 1-based step number). You may mark multiple steps: \`[STEP_DONE:1][STEP_DONE:2]\`. Never mark a step done just because you explained it — only when the learner has actually finished it.\n`
+    : "";
+
   return `You are a personalized AI tutor for the learning topic: "${node.title}".
 
 ## Project Context
@@ -69,6 +118,9 @@ ${profileContext}
 Title: ${node.title}
 Overview: ${node.brief}
 
+## What Comes Next (nodes unlocked after this one)
+${successorSection}
+
 ## Learning Progress
 ### Completed nodes (with summaries):
 ${completedSummaries}
@@ -79,15 +131,130 @@ ${mapOverview}
 ### Recent learner concerns (from latest conversations):
 ${recentConcernsText}
 
+## Current Project Code State
+${codeContextSection}
+${checklistSection}
 ## Your Role
-1. Teach the content of "${node.title}" clearly and deeply, tailored to this learner's background.
-2. Use concrete code examples relevant to the project "${project.title}".
-3. Share practical tips, tricks, and performance improvements applicable right now.
-4. Identify important field knowledge NOT yet in the map and recommend adding it as a new node when relevant.
-5. Acknowledge any recent concerns from the learner's prior sessions naturally.
-6. When the learner demonstrates understanding, suggest they mark this node as complete.
-7. Use markdown for code (use proper language tags for syntax highlighting), bullet lists, and bold key terms.
-8. Be concise but thorough — no fluff.`;
+1. Teach "${node.title}" at the exact level of this learner — NEVER explain things they already know.
+   - If they have years of Python/C experience: skip syntax basics, variable types, loops, functions, I/O — assume mastery.
+   - If they mention ROS2/robotics experience: treat it as prior knowledge and build on it directly.
+   - Only revisit fundamentals if the learner explicitly asks or is clearly confused.
+
+2. Calibrate response length to the question:
+   - Direct/short questions → direct, concise answers (no padding).
+   - "Explain how X works" questions → structured breakdown with headers or bullets.
+   - Never add filler phrases ("Great question!", "Certainly!", "Let me explain...").
+
+3. Guide, don't just solve:
+   - When the learner is stuck or asks for the answer, give a hint or ask a leading question first.
+   - Only reveal the full solution if they've made a genuine attempt or explicitly ask after a hint.
+   - When they make a mistake in code, point to the specific line and ask them to reason through it before fixing it for them.
+
+4. Adapt to pacing signals:
+   - If the learner is confused or asking repeated clarifying questions → slow down, simplify, use an analogy.
+   - If the learner is breezing through or already knows the answer → skip the basics, jump ahead, challenge them.
+
+5. ALWAYS build on the existing code above — do NOT rewrite from scratch.
+   - Reference files by name (e.g. "In \`calculator.py\`, modify the \`build_ui()\` function to...").
+   - Show only the specific lines/functions to add or change, not the entire file.
+   - Explain what to remove/replace and why.
+   - If the learner pastes their own code that differs from the stored version, treat THEIR version as the ground truth.
+
+6. All code examples must use "${project.title}"'s actual context — the project's domain, filenames, and variable names, not generic placeholders like "foo" or "my_app".
+
+7. Keep the "What Comes Next" nodes in mind — prepare the learner for those topics without doing the work for them.
+
+8. Share practical tips, gotchas, and performance considerations that experienced developers care about.
+
+9. Suggest adding a new node only when the learner raises a clearly distinct topic not covered anywhere in the map.
+
+10. Suggest marking this node complete only when the learner has demonstrated understanding: they've explained the concept back, produced working code, or completed the node's stated outcome. Don't rush them.
+
+11. Use markdown for code (with proper language tags), bullet lists, and bold key terms.
+
+12. Tone: direct and technical, like a senior developer pair-programming with the learner. No cheerleading.`;
+}
+
+export async function extractCodeContextUpdates(
+  nodeTitle: string,
+  project: { title: string },
+  userMessage: string,
+  assistantResponse: string,
+  existingFiles: CodeFile[]
+): Promise<Array<{ filename: string; isNew: boolean; content: string; description?: string; changeNote: string; reason: string }>> {
+  // Only bother if the response actually contains code blocks
+  if (!assistantResponse.includes("```")) return [];
+
+  const existingSummary = existingFiles.length === 0
+    ? "No files yet."
+    : existingFiles.map((f) => `- ${f.filename}: ${f.description}`).join("\n");
+
+  const prompt = `You are extracting code file changes from an AI tutor response.
+
+Project: "${project.title}"
+Current topic: "${nodeTitle}"
+Existing tracked files:
+${existingSummary}
+
+Learner asked: "${userMessage.slice(0, 300)}"
+
+Tutor responded (excerpt):
+${assistantResponse.slice(0, 3500)}
+
+Task: Identify code files that were created or modified in this response.
+- For EVERY file mentioned (new or changed): provide the filename, the COMPLETE FINAL code content as shown in the response, a short changeNote (max 15 words), and reason (max 10 words).
+- isNew=true if the file didn't exist before, isNew=false if it's a modification.
+- If the response only explains concepts without producing file-level code, return empty updates.
+
+IMPORTANT: Always include the full code content — this is how we track the current state of the project.
+
+Respond ONLY with valid JSON, no markdown:
+{"updates": [{"filename": "app.py", "isNew": false, "content": "# full file content here...", "description": "Main app", "changeNote": "added while True loop with quit", "reason": "user input loop"}]}
+OR
+{"updates": []}`;
+
+  try {
+    const response = await openrouter.chat.completions.create({
+      model: MODEL,
+      max_tokens: 2048,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+    const content = response.choices[0]?.message?.content;
+    if (!content) return [];
+    const parsed = JSON.parse(content) as { updates: Array<{ filename: string; isNew: boolean; content: string; description?: string; changeNote: string; reason: string }> };
+    return parsed.updates ?? [];
+  } catch {
+    return [];
+  }
+}
+
+export function applyCodeContextUpdates(
+  existingFiles: CodeFile[],
+  updates: Array<{ filename: string; isNew: boolean; content: string; description?: string; changeNote: string; reason: string }>
+): CodeFile[] {
+  const files = [...existingFiles];
+  for (const update of updates) {
+    if (!update.content) continue;
+    const existing = files.findIndex((f) => f.filename === update.filename);
+    const logEntry = { note: update.changeNote, reason: update.reason, timestamp: new Date().toISOString() };
+    if (existing >= 0) {
+      // Always update content to keep it current
+      files[existing] = {
+        ...files[existing],
+        content: update.content,
+        changeLog: [...files[existing].changeLog, logEntry],
+      };
+    } else {
+      files.push({
+        filename: update.filename,
+        description: update.description ?? update.filename,
+        content: update.content,
+        changeLog: [logEntry],
+      });
+    }
+  }
+  return files;
 }
 
 export async function* streamNodeChatMessage(
@@ -97,9 +264,10 @@ export async function* streamNodeChatMessage(
   history: ChatMessage[],
   userMessage: string,
   mapCtx: MapContext,
-  recentConcerns: string[]
+  recentConcerns: string[],
+  codeFiles: CodeFile[]
 ): AsyncGenerator<string> {
-  const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns);
+  const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles, history);
 
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
     { role: "system", content: systemPrompt },
@@ -127,16 +295,26 @@ export async function* streamOpeningMessage(
   project: { title: string; ideaPrompt: string },
   profile: LearnerProfile | null,
   mapCtx: MapContext,
-  recentConcerns: string[]
+  recentConcerns: string[],
+  codeFiles: CodeFile[]
 ): AsyncGenerator<string> {
-  const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns);
+  const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles);
 
-  const userPrompt = `I'm ready to start learning "${node.title}". Give me a rich, engaging introduction that:
-1. Explains why this topic is important for my project
-2. Outlines what I'll learn in this session
-3. Provides key context or prerequisites I should know
-4. Gives me a concrete first example or concept to get started
-Keep it focused and actionable.`;
+  const hasCode = codeFiles.length > 0;
+  const userPrompt = hasCode
+    ? `[Opening message for node: "${node.title}"]
+Generate a tutor opening message that:
+1. In 1–2 sentences, states what this session covers end-to-end (not just the first step — the full scope of this node).
+2. Lists ALL the mini-steps for this session in order as a numbered checklist (e.g. "1. Create X, 2. Add Y function, 3. Wire up Z, 4. Test with ..."). Every sub-task needed to complete this node should appear here.
+3. Names the specific file(s) and function(s) involved across those steps.
+4. Then asks: "Does your current code match what's shown above, or have you made changes? Paste your version if it differs — then we'll start on step 1."
+Keep it concise but complete — the learner should see the full plan before starting.`
+    : `[Opening message for node: "${node.title}"]
+Generate a tutor opening message that:
+1. In 1–2 sentences, states what this session covers end-to-end (not just the first step — the full scope of this node).
+2. Lists ALL the mini-steps for this session in order as a numbered checklist (e.g. "1. Install X, 2. Configure Y, 3. Create Z file, 4. Verify with ..."). Every sub-task needed to complete this node should appear here.
+3. Ends with: "Let's start with step 1." and immediately gives the first concrete action.
+Keep it concise but complete — the learner should see the full plan before starting.`;
 
   const stream = await openrouter.chat.completions.create({
     model: MODEL,
@@ -181,7 +359,7 @@ Tutor responded: "${assistantResponse.slice(0, 500)}..."
 Decide: Does the learner's message raise a distinct topic that:
 1. Is NOT already covered by any existing node in the map
 2. Would benefit from its own dedicated learning step
-3. Is specific enough to be a standalone 20-30 minute learning topic
+3. Is specific enough to be a standalone 15-minute learning topic
 
 If yes, specify a concise topic title (max 8 words).
 
@@ -335,13 +513,15 @@ ${edgeList || "None"}
 "${description}"
 
 Revise the future nodes to better match this direction. Rules:
-1. Keep completed nodes exactly as-is (don't include them in your output)
-2. You may update, remove, or add future nodes to match the new direction
-3. Keep the same node IDs where possible (reuse them if the node concept is retained)
+1. Keep completed nodes exactly as-is (don't include them in your output).
+2. You may update, remove, or add future nodes to match the new direction.
+3. Keep the same node IDs where possible (reuse them if the node concept is retained).
 4. Add new nodes with new IDs like "new1", "new2", etc.
-5. Maintain a coherent prerequisite graph (DAG, no cycles)
-6. 8-16 total nodes (completed + future combined)
-7. Nodes should still lead toward the same final project goal
+5. Maintain a coherent prerequisite graph (DAG, no cycles).
+6. Use as many future nodes as the remaining project scope genuinely requires — don't artificially compress or pad. Small remaining scope may need only 2–4 future nodes; a large pivot may need 15+.
+7. Nodes should still lead toward the same final project goal.
+8. Each node brief must describe a concrete outcome — what the learner will build or demonstrate, not just "understand".
+9. SKIP topics the learner already knows based on their profile — do not add nodes for things they've stated as prior knowledge.
 
 Respond ONLY with valid JSON, no markdown:
 {

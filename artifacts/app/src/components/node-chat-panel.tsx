@@ -21,6 +21,8 @@ import {
   Plus,
   Sparkles,
   Lock,
+  Check,
+  ChevronDown,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import ReactMarkdown from "react-markdown";
@@ -57,6 +59,100 @@ function CodeBlock({ className, children }: { className?: string; children?: Rea
   );
 }
 
+const STEP_DONE_RE = /\[STEP_DONE:\d+\]/g;
+
+function stripStepMarkers(content: string): string {
+  return content.replace(STEP_DONE_RE, "").trim();
+}
+
+function parseMinistepsFromContent(content: string): string[] {
+  const lines = content.split("\n");
+  const steps: string[] = [];
+  let inBlock = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^\d+\.\s+\S/.test(trimmed)) {
+      steps.push(trimmed.replace(/^\d+\.\s+/, ""));
+      inBlock = true;
+    } else if (inBlock && trimmed !== "") {
+      break;
+    }
+  }
+  return steps.length >= 2 ? steps : [];
+}
+
+function MarkdownContent({ content }: { content: string }) {
+  return (
+    <div className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 prose-code:before:content-none prose-code:after:content-none">
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ code: CodeBlock as any }}>
+        {stripStepMarkers(content)}
+      </ReactMarkdown>
+    </div>
+  );
+}
+
+function SessionChecklist({ steps, checked }: { steps: string[]; checked: Set<number> }) {
+  const [expanded, setExpanded] = useState(true);
+  if (steps.length < 2) return null;
+  const doneCount = checked.size;
+
+  return (
+    <div className="border-b border-border shrink-0">
+      <button
+        onClick={() => setExpanded((v) => !v)}
+        className="w-full flex items-center justify-between px-4 py-2 hover:bg-muted/30 transition-colors"
+      >
+        <div className="flex items-center gap-1.5">
+          <ChevronDown
+            className={cn(
+              "w-3 h-3 text-muted-foreground transition-transform duration-200",
+              !expanded && "-rotate-90"
+            )}
+          />
+          <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
+            Session plan
+          </span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] font-mono text-muted-foreground">
+            {doneCount}/{steps.length}
+          </span>
+          <div className="w-16 h-1 bg-border rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-500"
+              style={{ width: `${(doneCount / steps.length) * 100}%` }}
+            />
+          </div>
+        </div>
+      </button>
+      {expanded && (
+        <div className="px-4 pb-3 pt-1 space-y-1.5">
+          {steps.map((step, i) => (
+            <div key={i} className="flex items-start gap-2.5">
+              <div
+                className={cn(
+                  "w-3.5 h-3.5 rounded-sm border shrink-0 mt-0.5 flex items-center justify-center transition-colors",
+                  checked.has(i) ? "bg-primary border-primary" : "border-border"
+                )}
+              >
+                {checked.has(i) && <Check className="w-2 h-2 text-primary-foreground" />}
+              </div>
+              <span
+                className={cn(
+                  "text-xs leading-relaxed",
+                  checked.has(i) ? "line-through text-muted-foreground" : "text-foreground/80"
+                )}
+              >
+                {step}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
@@ -77,14 +173,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {isUser ? (
           <p className="whitespace-pre-wrap text-sm leading-relaxed">{message.content}</p>
         ) : (
-          <div className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 prose-code:before:content-none prose-code:after:content-none">
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{ code: CodeBlock as any }}
-            >
-              {message.content}
-            </ReactMarkdown>
-          </div>
+          <MarkdownContent content={message.content} />
         )}
       </div>
     </div>
@@ -129,6 +218,9 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
   const [showSpawnInput, setShowSpawnInput] = useState(false);
   const [isSpawning, setIsSpawning] = useState(false);
   const [completedSummary, setCompletedSummary] = useState<string | null>(null);
+  const [ministeps, setMinisteps] = useState<string[]>([]);
+  const [checkedSteps, setCheckedSteps] = useState<Set<number>>(new Set());
+  const ministepsParsed = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -225,6 +317,15 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
     }
   }, [projectId, nodeId, base, openingInProgress, queryClient]);
 
+  // Reset per-node state when switching nodes
+  useEffect(() => {
+    ministepsParsed.current = false;
+    setMinisteps([]);
+    setCheckedSteps(new Set());
+    setLocalMessages([]);
+    setLocalMessagesLoaded(false);
+  }, [nodeId]);
+
   useEffect(() => {
     if (chatHistory && !localMessagesLoaded) {
       const msgs = chatHistory.messages as ChatMessage[];
@@ -235,6 +336,31 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
       }
     }
   }, [chatHistory, localMessagesLoaded]);
+
+  // Parse ministeps from opening message; reconstruct checked state from all stored messages
+  useEffect(() => {
+    if (localMessages.length === 0) return;
+
+    if (!ministepsParsed.current) {
+      const opening = localMessages.find((m) => m.role === "assistant");
+      if (opening) {
+        const steps = parseMinistepsFromContent(opening.content);
+        if (steps.length >= 2) {
+          setMinisteps(steps);
+          ministepsParsed.current = true;
+        }
+      }
+    }
+
+    const completed = new Set<number>();
+    for (const msg of localMessages) {
+      if (msg.role !== "assistant") continue;
+      for (const match of msg.content.matchAll(/\[STEP_DONE:(\d+)\]/g)) {
+        completed.add(parseInt(match[1], 10) - 1);
+      }
+    }
+    setCheckedSteps(completed);
+  }, [localMessages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -291,6 +417,8 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
               if (parsed.type === "chunk" && parsed.content) {
                 fullContent += parsed.content;
                 setStreamingContent(fullContent);
+              } else if (parsed.type === "step_done" && typeof parsed.stepIndex === "number") {
+                setCheckedSteps((prev) => new Set([...prev, parsed.stepIndex as number]));
               } else if (parsed.type === "done") {
                 // message complete
               } else if (parsed.type === "extra_node_spawned") {
@@ -485,6 +613,8 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
           </div>
         )}
       </div>
+
+      <SessionChecklist steps={ministeps} checked={checkedSteps} />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
         {chatLoading && !localMessagesLoaded ? (

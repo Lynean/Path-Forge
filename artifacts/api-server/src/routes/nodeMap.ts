@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, inArray } from "drizzle-orm";
-import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, chatSessionsTable, learnerProfilesTable } from "@workspace/db";
+import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, chatSessionsTable, learnerProfilesTable, projectCodeContextTable } from "@workspace/db";
+import type { CodeFile } from "@workspace/db";
 import {
   GenerateNodeMapParams,
   GenerateNodeMapResponse,
@@ -28,8 +29,66 @@ import {
   generateNodeSummary,
   generateSpawnedNode,
   revisePlanNodes,
+  extractCodeContextUpdates,
+  applyCodeContextUpdates,
   type ChatMessage,
 } from "../lib/aiNodeChat";
+
+async function getOrCreateCodeContext(projectId: number): Promise<{ id: number; files: CodeFile[] }> {
+  const [existing] = await db.select().from(projectCodeContextTable).where(eq(projectCodeContextTable.projectId, projectId));
+  if (existing) return { id: existing.id, files: (existing.files as CodeFile[]) ?? [] };
+  const [created] = await db.insert(projectCodeContextTable).values({ projectId, files: [] as any }).returning();
+  return { id: created.id, files: [] };
+}
+
+async function saveCodeContext(projectId: number, files: CodeFile[]): Promise<void> {
+  await db.insert(projectCodeContextTable)
+    .values({ projectId, files: files as any })
+    .onConflictDoUpdate({
+      target: projectCodeContextTable.projectId,
+      set: { files: files as any, updatedAt: new Date().toISOString() },
+    });
+}
+
+async function extractAndSaveFromMessages(
+  projectId: number,
+  nodeTitle: string,
+  project: { title: string },
+  messages: ChatMessage[]
+): Promise<void> {
+  const hasCode = (m: ChatMessage) => m.content.includes("```");
+  if (!messages.some(hasCode)) return;
+
+  const { files: currentFiles } = await getOrCreateCodeContext(projectId);
+  let files = currentFiles;
+
+  // Process pairs: for each assistant message with code, also check if the
+  // preceding/following user message has code (user's own implementation).
+  // User-pasted code is processed LAST so it overwrites AI suggestions.
+  const assistantCodeMsgs = messages.filter((m) => m.role === "assistant" && hasCode(m)).slice(-5);
+  const userCodeMsgs = messages.filter((m) => m.role === "user" && hasCode(m)).slice(-3);
+
+  for (const msg of assistantCodeMsgs) {
+    const idx = messages.indexOf(msg);
+    const priorUserMsg = messages.slice(0, idx).filter((m) => m.role === "user").slice(-1)[0]?.content ?? "";
+    const updates = await extractCodeContextUpdates(nodeTitle, project, priorUserMsg, msg.content, files);
+    if (updates.length > 0) files = applyCodeContextUpdates(files, updates);
+  }
+
+  // User's own code always wins — overwrite whatever the AI suggested
+  for (const msg of userCodeMsgs) {
+    const updates = await extractCodeContextUpdates(nodeTitle, project, "", msg.content, files);
+    if (updates.length > 0) {
+      // Mark these as user-authored in the change log
+      const userUpdates = updates.map((u) => ({ ...u, changeNote: `[user] ${u.changeNote}`, reason: "user implementation" }));
+      files = applyCodeContextUpdates(files, userUpdates);
+    }
+  }
+
+  if (files !== currentFiles) {
+    await saveCodeContext(projectId, files);
+  }
+}
 
 const router: IRouter = Router();
 
@@ -112,13 +171,18 @@ router.post("/projects/:projectId/generate-map", requireAuth, async (req, res): 
       mapId = newMap.id;
     }
 
+    // Clear code context so the next session starts fresh
+    await tx.delete(projectCodeContextTable)
+      .where(eq(projectCodeContextTable.projectId, params.data.projectId));
+
     const aiIdToDbId = new Map<string, number>();
     for (const aiNode of aiResult.nodes) {
+      const isStarter = aiNode.prerequisite_ids.length === 0;
       const [insertedNode] = await tx.insert(nodesTable).values({
         mapId,
         title: aiNode.title,
         brief: aiNode.brief,
-        status: aiNode.status,
+        status: isStarter ? "available" : "locked",
         isExtra: aiNode.is_extra,
       }).returning();
       aiIdToDbId.set(aiNode.id, insertedNode.id);
@@ -178,6 +242,10 @@ router.patch("/projects/:projectId/nodes/:nodeId", requireAuth, async (req, res)
       const session = await getOrCreateChatSession(node.id);
       const history = (Array.isArray(session.messages) ? session.messages : []) as ChatMessage[];
       summary = await generateNodeSummary(node, project, history);
+
+      // Authoritative code extraction — runs on full chat history at completion time
+      extractAndSaveFromMessages(params.data.projectId, node.title, project, history)
+        .catch(() => {});
     } catch {
       summary = `Completed ${node.title}`;
     }
@@ -264,6 +332,7 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
   const [profile] = await db.select().from(learnerProfilesTable).where(eq(learnerProfilesTable.clerkUserId, userId));
   const { allNodes, allEdges } = await getMapContext(map.id);
   const recentConcerns = await getRecentConcerns(node.id, map.id);
+  const { files: codeFiles } = await getOrCreateCodeContext(params.data.projectId);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -277,7 +346,7 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
 
   let fullContent = "";
   try {
-    for await (const chunk of streamOpeningMessage(node, project, profile ?? null, { allNodes, allEdges }, recentConcerns)) {
+    for await (const chunk of streamOpeningMessage(node, project, profile ?? null, { allNodes, allEdges }, recentConcerns, codeFiles)) {
       fullContent += chunk;
       res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
     }
@@ -292,6 +361,10 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
       await db.update(chatSessionsTable)
         .set({ messages: newMessages as any, updatedAt: new Date().toISOString() })
         .where(eq(chatSessionsTable.nodeId, node.id));
+
+      // Extract code context from the opening message (fire-and-forget)
+      extractAndSaveFromMessages(params.data.projectId, node.title, project, newMessages)
+        .catch(() => {});
     }
 
     res.write("data: [DONE]\n\n");
@@ -327,6 +400,7 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
   const history = (Array.isArray(session.messages) ? session.messages : []) as ChatMessage[];
   const { allNodes, allEdges } = await getMapContext(map.id);
   const recentConcerns = await getRecentConcerns(node.id, map.id);
+  const { files: codeFiles } = await getOrCreateCodeContext(params.data.projectId);
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -341,12 +415,14 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
   let fullContent = "";
   try {
     for await (const chunk of streamNodeChatMessage(
-      node, project, profile ?? null, history, body.data.content, { allNodes, allEdges }, recentConcerns
+      node, project, profile ?? null, history, body.data.content, { allNodes, allEdges }, recentConcerns, codeFiles
     )) {
       fullContent += chunk;
       res.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);
     }
 
+    // Parse [STEP_DONE:N] markers and emit step_done events before storing
+    const stepDoneMatches = [...fullContent.matchAll(/\[STEP_DONE:(\d+)\]/g)];
     const newMessages: ChatMessage[] = [
       ...history,
       { role: "user" as const, content: body.data.content, createdAt: new Date().toISOString() },
@@ -357,7 +433,16 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
       .set({ messages: newMessages as any, updatedAt: new Date().toISOString() })
       .where(eq(chatSessionsTable.nodeId, node.id));
 
+    for (const match of stepDoneMatches) {
+      const stepIndex = parseInt(match[1], 10) - 1;
+      res.write(`data: ${JSON.stringify({ type: "step_done", stepIndex })}\n\n`);
+    }
+
     res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+
+    // Extract code context from the full updated messages (fire-and-forget)
+    extractAndSaveFromMessages(params.data.projectId, node.title, project, newMessages)
+      .catch(() => {});
 
     try {
       const classification = await classifyExtraNodeNeeded(

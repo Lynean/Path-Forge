@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, count, sql } from "drizzle-orm";
-import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable } from "@workspace/db";
+import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, learnerProfilesTable } from "@workspace/db";
 import {
   CreateProjectBody,
   CreateProjectResponse,
@@ -17,8 +17,25 @@ import {
   GetNodeMapResponse,
 } from "@workspace/api-zod";
 import { requireAuth, getAuthUserId } from "../lib/auth";
+import { generateFramingQuestions } from "../lib/aiNodeMap";
 
 const router: IRouter = Router();
+
+router.post("/projects/frame-questions", requireAuth, async (req, res): Promise<void> => {
+  const userId = getAuthUserId(req);
+  const { title, ideaPrompt } = req.body as { title?: string; ideaPrompt?: string };
+  if (!title?.trim() || !ideaPrompt?.trim()) {
+    res.status(400).json({ error: "title and ideaPrompt are required" });
+    return;
+  }
+  const [profile] = await db.select().from(learnerProfilesTable).where(eq(learnerProfilesTable.clerkUserId, userId));
+  try {
+    const result = await generateFramingQuestions(title, ideaPrompt, profile ?? null);
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Failed to generate questions" });
+  }
+});
 
 router.get("/projects", requireAuth, async (req, res): Promise<void> => {
   const userId = getAuthUserId(req);

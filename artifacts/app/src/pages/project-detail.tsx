@@ -52,6 +52,7 @@ export default function ProjectDetail() {
   const isDraggingRef = useRef(false);
   const dragStartXRef = useRef(0);
   const dragStartWidthRef = useRef(420);
+  const rafRef = useRef<number | null>(null);
 
   const handleDragStart = useCallback((e: React.MouseEvent) => {
     isDraggingRef.current = true;
@@ -63,11 +64,21 @@ export default function ProjectDetail() {
   useEffect(() => {
     const onMouseMove = (e: MouseEvent) => {
       if (!isDraggingRef.current) return;
-      const delta = dragStartXRef.current - e.clientX;
-      const next = Math.min(Math.max(dragStartWidthRef.current + delta, 300), 900);
-      setPanelWidth(next);
+      if (rafRef.current !== null) return;
+      rafRef.current = requestAnimationFrame(() => {
+        const delta = dragStartXRef.current - e.clientX;
+        const next = Math.min(Math.max(dragStartWidthRef.current + delta, 300), 900);
+        setPanelWidth(next);
+        rafRef.current = null;
+      });
     };
-    const onMouseUp = () => { isDraggingRef.current = false; };
+    const onMouseUp = () => {
+      isDraggingRef.current = false;
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
     document.addEventListener("mousemove", onMouseMove);
     document.addEventListener("mouseup", onMouseUp);
     return () => {
