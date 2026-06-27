@@ -131,6 +131,44 @@ async function getRecentConcerns(excludeNodeId: number, mapId: number): Promise<
   return concerns.slice(0, 6);
 }
 
+function asksToRepositionCheckpoint(description: string): boolean {
+  const text = description.toLowerCase();
+  return (
+    /(docker|caddy|validation|checkpoint)/.test(text) &&
+    /(not.*first|first.*wrong|after|historical|out of order|checkpoint)/.test(text)
+  );
+}
+
+async function repositionCompletedIntegrationCheckpoints(mapId: number, description: string): Promise<void> {
+  if (!asksToRepositionCheckpoint(description)) return;
+
+  const nodes = await db.select().from(nodesTable).where(eq(nodesTable.mapId, mapId));
+  const checkpointNodes = nodes.filter((node) =>
+    node.status === "completed" &&
+    /(docker|caddy|validate|validation|https)/i.test(node.title)
+  );
+  if (checkpointNodes.length === 0) return;
+
+  const upstreamNodes = nodes.filter((node) =>
+    !checkpointNodes.some((checkpoint) => checkpoint.id === node.id) &&
+    /(analy[sz]e|documentation|code|scaffold|rebuild|core|provision|import|activate|wire|workflow)/i.test(node.title) &&
+    !/(docker|caddy|validate|validation|checkpoint|demonstrate|test|security|documentation$|final)/i.test(node.title)
+  );
+  if (upstreamNodes.length === 0) return;
+
+  for (const checkpoint of checkpointNodes) {
+    await db.delete(nodeEdgesTable).where(eq(nodeEdgesTable.fromNodeId, checkpoint.id));
+    await db.delete(nodeEdgesTable).where(eq(nodeEdgesTable.toNodeId, checkpoint.id));
+
+    for (const upstream of upstreamNodes) {
+      await db.insert(nodeEdgesTable).values({
+        fromNodeId: upstream.id,
+        toNodeId: checkpoint.id,
+      });
+    }
+  }
+}
+
 router.post("/projects/:projectId/generate-map", requireAuth, async (req, res): Promise<void> => {
   const userId = getAuthUserId(req);
   const params = GenerateNodeMapParams.safeParse(req.params);
@@ -615,6 +653,8 @@ router.post("/projects/:projectId/revise-plan", requireAuth, async (req, res): P
       }
     }
   }
+
+  await repositionCompletedIntegrationCheckpoints(map.id, body.data.description);
 
   const updatedNodes = await db.select().from(nodesTable).where(eq(nodesTable.mapId, map.id)).orderBy(nodesTable.createdAt);
   const updatedNodeIds = updatedNodes.map((n) => n.id);
