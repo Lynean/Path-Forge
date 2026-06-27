@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, and, inArray } from "drizzle-orm";
 import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, chatSessionsTable, learnerProfilesTable, projectCodeContextTable } from "@workspace/db";
-import type { CodeFile } from "@workspace/db";
+import type { CodeFile, Node as DbNode, NodeEdge } from "@workspace/db";
 import {
   GenerateNodeMapParams,
   GenerateNodeMapResponse,
@@ -167,6 +167,181 @@ async function repositionCompletedIntegrationCheckpoints(mapId: number, descript
       });
     }
   }
+}
+
+type OutcomeKey =
+  | "nocodb"
+  | "n8n-import"
+  | "n8n-wire"
+  | "docker"
+  | "flow-demo"
+  | "core-app"
+  | "bpmview"
+  | "playwright"
+  | "unit-tests"
+  | "ops-docs"
+  | "security"
+  | "refactor-deploy"
+  | "final-testing";
+
+const OUTCOME_PATTERNS: Array<{ key: OutcomeKey; pattern: RegExp }> = [
+  { key: "nocodb", pattern: /\b(nocodb|data source|data-source|table provisioning|provision.*config)\b/i },
+  { key: "n8n-import", pattern: /\b(import|activate|activation)\b.*\bn8n\b|\bn8n\b.*\b(import|activate|activation)\b/i },
+  { key: "n8n-wire", pattern: /\b(wire|connect|workflow logic|transition logic|server-side block|bpm transition)\b.*\bn8n\b|\bn8n\b.*\b(wire|connect|logic|transition)\b/i },
+  { key: "docker", pattern: /\b(docker|caddy|local https|development environment|dev environment)\b/i },
+  { key: "flow-demo", pattern: /\b(demonstrate|demo|linear flow|threshold|matrix|escalation|exception flow|flow execution)\b/i },
+  { key: "core-app", pattern: /\b(rebuild core|react\/vite|react|vite|application shell|feature-gated|rule engine framework)\b/i },
+  { key: "bpmview", pattern: /\b(bpmview|inline form|iframe rendering|hashrouter form)\b/i },
+  { key: "playwright", pattern: /\b(playwright|end-to-end|e2e|uat|live transition|block-rule)\b/i },
+  { key: "unit-tests", pattern: /\b(vitest|unit test|rule evaluation test)\b/i },
+  { key: "ops-docs", pattern: /\b(operations documentation|runbook|gotchas|deployment instructions|data migration|troubleshooting|docs\/)\b/i },
+  { key: "security", pattern: /\b(security|hardening|admin token|server-side authentication|api proxy|secret)\b/i },
+  { key: "refactor-deploy", pattern: /\b(refactor|reusability|deployment readiness|deployment preparation|finalize deployment|production deploy)\b/i },
+  { key: "final-testing", pattern: /\b(final application|final assembly|final testing|cohesive starter|robust and deployable)\b/i },
+];
+
+function asksToCleanPlan(description: string): boolean {
+  return /\b(clean|cleanup|dedupe|de-duplicate|duplicate|consolidate|align with the real implementation|real implementation|remaining path)\b/i.test(description);
+}
+
+function classifyOutcome(node: Pick<DbNode, "title" | "brief">): OutcomeKey | undefined {
+  const text = `${node.title} ${node.brief}`;
+  return OUTCOME_PATTERNS.find(({ pattern }) => pattern.test(text))?.key;
+}
+
+function descriptionMarksOutcomeComplete(description: string, key: OutcomeKey): boolean {
+  const outcome = OUTCOME_PATTERNS.find((item) => item.key === key);
+  if (!outcome || !outcome.pattern.test(description)) return false;
+  return /\b(already completed|completed evidence|completed|done|verified|validated|created|exists|wired|expanded)\b/i.test(description);
+}
+
+function allowedRemainingOutcomes(description: string): Set<OutcomeKey> | null {
+  if (!/remaining path should focus only|focus only on genuinely unfinished/i.test(description)) return null;
+
+  const allowed = new Set<OutcomeKey>();
+  if (/\bsecurity|hardening\b/i.test(description)) allowed.add("security");
+  if (/\brefactor|deployment readiness|deployment preparation\b/i.test(description)) allowed.add("refactor-deploy");
+  if (/\boperations documentation|documentation review|docs review|gap remains\b/i.test(description)) allowed.add("ops-docs");
+  if (/\bfinal assembly|final testing|testing\b/i.test(description)) allowed.add("final-testing");
+  return allowed;
+}
+
+function pickKeeper(nodes: DbNode[]): DbNode {
+  return [...nodes].sort((a, b) => {
+    if (a.status === "available" && b.status !== "available") return -1;
+    if (b.status === "available" && a.status !== "available") return 1;
+    return a.id - b.id;
+  })[0];
+}
+
+async function deleteFutureNodesAndRewire(
+  nodesToDelete: DbNode[],
+  replacementByDeletedId: Map<number, number | undefined>,
+  edges: NodeEdge[]
+): Promise<void> {
+  if (nodesToDelete.length === 0) return;
+
+  const deletedIds = new Set(nodesToDelete.map((node) => node.id));
+  const additions = new Map<string, { fromNodeId: number; toNodeId: number }>();
+
+  for (const node of nodesToDelete) {
+    const replacementId = replacementByDeletedId.get(node.id);
+    const incoming = edges.filter((edge) => edge.toNodeId === node.id && !deletedIds.has(edge.fromNodeId));
+    const outgoing = edges.filter((edge) => edge.fromNodeId === node.id && !deletedIds.has(edge.toNodeId));
+
+    if (replacementId) {
+      for (const edge of incoming) {
+        if (edge.fromNodeId !== replacementId) {
+          additions.set(`${edge.fromNodeId}:${replacementId}`, { fromNodeId: edge.fromNodeId, toNodeId: replacementId });
+        }
+      }
+      for (const edge of outgoing) {
+        if (replacementId !== edge.toNodeId) {
+          additions.set(`${replacementId}:${edge.toNodeId}`, { fromNodeId: replacementId, toNodeId: edge.toNodeId });
+        }
+      }
+    } else {
+      for (const incomingEdge of incoming) {
+        for (const outgoingEdge of outgoing) {
+          if (incomingEdge.fromNodeId !== outgoingEdge.toNodeId) {
+            additions.set(`${incomingEdge.fromNodeId}:${outgoingEdge.toNodeId}`, {
+              fromNodeId: incomingEdge.fromNodeId,
+              toNodeId: outgoingEdge.toNodeId,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  const deleteIds = [...deletedIds];
+  await db.delete(nodeEdgesTable).where(inArray(nodeEdgesTable.toNodeId, deleteIds));
+  await db.delete(nodeEdgesTable).where(inArray(nodeEdgesTable.fromNodeId, deleteIds));
+  await db.delete(nodesTable).where(inArray(nodesTable.id, deleteIds));
+
+  const remainingEdgeKeys = new Set(
+    edges
+      .filter((edge) => !deletedIds.has(edge.fromNodeId) && !deletedIds.has(edge.toNodeId))
+      .map((edge) => `${edge.fromNodeId}:${edge.toNodeId}`)
+  );
+
+  for (const [key, edge] of additions) {
+    if (!remainingEdgeKeys.has(key)) {
+      await db.insert(nodeEdgesTable).values(edge);
+      remainingEdgeKeys.add(key);
+    }
+  }
+}
+
+async function cleanupFuturePlanNodes(mapId: number, description: string): Promise<void> {
+  if (!asksToCleanPlan(description)) return;
+
+  const nodes = await db.select().from(nodesTable).where(eq(nodesTable.mapId, mapId));
+  const nodeIds = nodes.map((node) => node.id);
+  const edges = nodeIds.length > 0
+    ? await db.select().from(nodeEdgesTable).where(inArray(nodeEdgesTable.fromNodeId, nodeIds))
+    : [];
+
+  const futureNodes = nodes.filter((node) => node.status !== "completed");
+  const completedNodes = nodes.filter((node) => node.status === "completed");
+  const allowedRemaining = allowedRemainingOutcomes(description);
+  const replacementByDeletedId = new Map<number, number | undefined>();
+  const nodesToDelete = new Map<number, DbNode>();
+  const futureByOutcome = new Map<OutcomeKey, DbNode[]>();
+
+  for (const node of futureNodes) {
+    const outcome = classifyOutcome(node);
+    if (!outcome) continue;
+
+    const completedReplacement = completedNodes.find((completed) => classifyOutcome(completed) === outcome);
+    if (descriptionMarksOutcomeComplete(description, outcome)) {
+      nodesToDelete.set(node.id, node);
+      replacementByDeletedId.set(node.id, completedReplacement?.id);
+      continue;
+    }
+
+    if (allowedRemaining && !allowedRemaining.has(outcome)) {
+      nodesToDelete.set(node.id, node);
+      replacementByDeletedId.set(node.id, completedReplacement?.id);
+      continue;
+    }
+
+    const existing = futureByOutcome.get(outcome) ?? [];
+    existing.push(node);
+    futureByOutcome.set(outcome, existing);
+  }
+
+  for (const group of futureByOutcome.values()) {
+    if (group.length <= 1) continue;
+    const keeper = pickKeeper(group);
+    for (const duplicate of group) {
+      if (duplicate.id === keeper.id) continue;
+      nodesToDelete.set(duplicate.id, duplicate);
+      replacementByDeletedId.set(duplicate.id, keeper.id);
+    }
+  }
+
+  await deleteFutureNodesAndRewire([...nodesToDelete.values()], replacementByDeletedId, edges);
 }
 
 router.post("/projects/:projectId/generate-map", requireAuth, async (req, res): Promise<void> => {
@@ -655,6 +830,7 @@ router.post("/projects/:projectId/revise-plan", requireAuth, async (req, res): P
   }
 
   await repositionCompletedIntegrationCheckpoints(map.id, body.data.description);
+  await cleanupFuturePlanNodes(map.id, body.data.description);
 
   const updatedNodes = await db.select().from(nodesTable).where(eq(nodesTable.mapId, map.id)).orderBy(nodesTable.createdAt);
   const updatedNodeIds = updatedNodes.map((n) => n.id);
