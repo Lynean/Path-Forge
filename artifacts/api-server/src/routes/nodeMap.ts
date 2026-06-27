@@ -414,8 +414,12 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
 
   let fullContent = "";
   try {
+    const completedStepIndices = Array.isArray(req.body.completedStepIndices)
+      ? (req.body.completedStepIndices as number[])
+      : [];
+
     for await (const chunk of streamNodeChatMessage(
-      node, project, profile ?? null, history, body.data.content, { allNodes, allEdges }, recentConcerns, codeFiles
+      node, project, profile ?? null, history, body.data.content, { allNodes, allEdges }, recentConcerns, codeFiles, completedStepIndices
     )) {
       fullContent += chunk;
       res.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);

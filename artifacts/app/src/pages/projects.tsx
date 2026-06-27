@@ -1,15 +1,18 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useListProjects, useCreateProject } from "@workspace/api-client-react";
+import { useListProjects, useCreateProject, useDeleteProject, getListProjectsQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, ArrowRight, ArrowLeft } from "lucide-react";
+import { Loader2, ArrowRight, ArrowLeft, Trash2 } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface FramingQuestion {
@@ -32,14 +35,25 @@ function buildEnrichedPrompt(
 export default function Projects() {
   const [, setLocation] = useLocation();
   const [open, setOpen] = useState(false);
-  const [step, setStep] = useState<"form" | "loading" | "framing">("form");
+  const [step, setStep] = useState<"form" | "loading" | "framing" | "refining">("form");
   const [title, setTitle] = useState("");
   const [ideaPrompt, setIdeaPrompt] = useState("");
   const [framingQuestions, setFramingQuestions] = useState<FramingQuestion[]>([]);
   const [answers, setAnswers] = useState<Record<string, string>>({});
+  const [otherSelected, setOtherSelected] = useState<Record<string, boolean>>({});
 
+  const [deleteTargetId, setDeleteTargetId] = useState<number | null>(null);
+  const queryClient = useQueryClient();
   const { data: projects, isLoading } = useListProjects();
   const createProject = useCreateProject();
+  const deleteProject = useDeleteProject({
+    mutation: {
+      onSuccess: () => {
+        queryClient.invalidateQueries({ queryKey: getListProjectsQueryKey() });
+        setDeleteTargetId(null);
+      },
+    },
+  });
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -49,6 +63,7 @@ export default function Projects() {
     setIdeaPrompt("");
     setFramingQuestions([]);
     setAnswers({});
+    setOtherSelected({});
   };
 
   const handleOpenChange = (v: boolean) => {
@@ -88,7 +103,23 @@ export default function Projects() {
     }
   };
 
-  const handleCreate = () => doCreate(buildEnrichedPrompt(ideaPrompt, framingQuestions, answers));
+  const handleCreate = async () => {
+    setStep("refining");
+    const qa = framingQuestions
+      .filter((q) => answers[q.id])
+      .map((q) => ({ question: q.question, answer: answers[q.id] }));
+    try {
+      const res = await fetch(`${base}/api/projects/refine-description`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, ideaPrompt, qa }),
+      });
+      const data = (await res.json()) as { description?: string };
+      doCreate(data.description ?? buildEnrichedPrompt(ideaPrompt, framingQuestions, answers));
+    } catch {
+      doCreate(buildEnrichedPrompt(ideaPrompt, framingQuestions, answers));
+    }
+  };
 
   const allAnswered =
     framingQuestions.length > 0 && framingQuestions.every((q) => answers[q.id]);
@@ -155,6 +186,17 @@ export default function Projects() {
               </div>
             )}
 
+            {/* ── Step 3b: AI refining description ── */}
+            {step === "refining" && (
+              <div className="py-14 flex flex-col items-center gap-4 text-center">
+                <Loader2 className="w-7 h-7 animate-spin text-primary" />
+                <div>
+                  <p className="font-mono text-sm font-semibold">{title}</p>
+                  <p className="text-xs text-muted-foreground mt-1">Refining your project description...</p>
+                </div>
+              </div>
+            )}
+
             {/* ── Step 3: MCQ framing ── */}
             {step === "framing" && (
               <>
@@ -177,12 +219,13 @@ export default function Projects() {
                           <button
                             key={opt}
                             type="button"
-                            onClick={() =>
-                              setAnswers((prev) => ({ ...prev, [q.id]: opt }))
-                            }
+                            onClick={() => {
+                              setOtherSelected((prev) => ({ ...prev, [q.id]: false }));
+                              setAnswers((prev) => ({ ...prev, [q.id]: opt }));
+                            }}
                             className={cn(
                               "w-full text-left text-sm px-3.5 py-2.5 rounded-lg border transition-all",
-                              answers[q.id] === opt
+                              answers[q.id] === opt && !otherSelected[q.id]
                                 ? "border-primary bg-primary/10 text-foreground font-medium"
                                 : "border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40 hover:text-foreground"
                             )}
@@ -190,6 +233,34 @@ export default function Projects() {
                             {opt}
                           </button>
                         ))}
+                        {/* Other option */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setOtherSelected((prev) => ({ ...prev, [q.id]: true }));
+                            setAnswers((prev) => ({ ...prev, [q.id]: "" }));
+                          }}
+                          className={cn(
+                            "w-full text-left text-sm px-3.5 py-2.5 rounded-lg border transition-all",
+                            otherSelected[q.id]
+                              ? "border-primary bg-primary/10 text-foreground font-medium"
+                              : "border-border text-muted-foreground hover:border-primary/40 hover:bg-muted/40 hover:text-foreground"
+                          )}
+                        >
+                          Other...
+                        </button>
+                        {otherSelected[q.id] && (
+                          <input
+                            autoFocus
+                            type="text"
+                            value={answers[q.id] ?? ""}
+                            onChange={(e) =>
+                              setAnswers((prev) => ({ ...prev, [q.id]: e.target.value }))
+                            }
+                            placeholder="Describe your situation..."
+                            className="w-full bg-input border border-primary/60 rounded-lg px-3.5 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                          />
+                        )}
                       </div>
                     </div>
                   ))}
@@ -273,16 +344,36 @@ export default function Projects() {
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
                   <CardTitle className="font-mono text-xl line-clamp-1">{project.title}</CardTitle>
-                  <Badge
-                    variant={project.status === "completed" ? "default" : "secondary"}
-                    className="uppercase text-[10px] tracking-wider"
-                  >
-                    {project.status}
-                  </Badge>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Badge
+                      variant={project.status === "completed" ? "default" : "secondary"}
+                      className="uppercase text-[10px] tracking-wider"
+                    >
+                      {project.status}
+                    </Badge>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
+                      onClick={(e) => { e.stopPropagation(); setDeleteTargetId(project.id); }}
+                      title="Delete project"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </Button>
+                  </div>
                 </div>
-                <CardDescription className="line-clamp-2 mt-2 text-sm">
-                  {project.ideaPrompt}
-                </CardDescription>
+                <TooltipProvider delayDuration={400}>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <CardDescription className="line-clamp-2 mt-2 text-sm cursor-default">
+                        {project.ideaPrompt}
+                      </CardDescription>
+                    </TooltipTrigger>
+                    <TooltipContent side="bottom" className="max-w-72 text-xs whitespace-pre-wrap">
+                      {project.ideaPrompt}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
               </CardHeader>
               <CardContent className="flex-1">
                 <div className="space-y-2 mt-auto">
@@ -306,6 +397,27 @@ export default function Projects() {
           ))}
         </div>
       )}
+
+      <AlertDialog open={deleteTargetId !== null} onOpenChange={(v) => { if (!v) setDeleteTargetId(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete project?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently deletes the project, its learning map, all chat history, and code context. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteProject.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteTargetId !== null && deleteProject.mutate({ projectId: deleteTargetId })}
+              disabled={deleteProject.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleteProject.isPending ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

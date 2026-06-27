@@ -73,7 +73,8 @@ function buildRichSystemPrompt(
   mapCtx: MapContext,
   recentConcerns: string[],
   codeFiles: CodeFile[],
-  history?: ChatMessage[]
+  history?: ChatMessage[],
+  completedStepIndices?: number[]
 ): string {
   const profileContext = buildProfileContext(profile);
 
@@ -101,8 +102,9 @@ function buildRichSystemPrompt(
   const successorSection = buildSuccessorSection(node.id, mapCtx);
 
   const ministeps = history ? extractMinistepsFromHistory(history) : [];
+  const done = new Set(completedStepIndices ?? []);
   const checklistSection = ministeps.length >= 2
-    ? `\n## Session Checklist\nThese are the mini-steps you defined for this session:\n${ministeps.map((s, i) => `${i + 1}. ${s}`).join("\n")}\n\nTracking rule: when the learner has COMPLETED a step — meaning they've implemented it, run it, and confirmed it works — append \`[STEP_DONE:N]\` at the very end of your response (N = 1-based step number). You may mark multiple steps: \`[STEP_DONE:1][STEP_DONE:2]\`. Never mark a step done just because you explained it — only when the learner has actually finished it.\n`
+    ? `\n## Session Checklist\nMini-steps for this session (✓ = done, ○ = pending):\n${ministeps.map((s, i) => `${done.has(i) ? "✓" : "○"} ${i + 1}. ${s}`).join("\n")}\n\nTracking rule: when the learner has COMPLETED a pending step — they've implemented it, run it, and confirmed it works — append \`[STEP_DONE:N]\` at the very end of your response (N = 1-based step number). You may mark multiple: \`[STEP_DONE:1][STEP_DONE:2]\`. Never mark a step done just because you explained it. Steps already marked ✓ are done — do not re-mark them.\n`
     : "";
 
   return `You are a personalized AI tutor for the learning topic: "${node.title}".
@@ -265,9 +267,10 @@ export async function* streamNodeChatMessage(
   userMessage: string,
   mapCtx: MapContext,
   recentConcerns: string[],
-  codeFiles: CodeFile[]
+  codeFiles: CodeFile[],
+  completedStepIndices: number[] = []
 ): AsyncGenerator<string> {
-  const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles, history);
+  const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles, history, completedStepIndices);
 
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
     { role: "system", content: systemPrompt },
@@ -304,17 +307,21 @@ export async function* streamOpeningMessage(
   const userPrompt = hasCode
     ? `[Opening message for node: "${node.title}"]
 Generate a tutor opening message that:
-1. In 1–2 sentences, states what this session covers end-to-end (not just the first step — the full scope of this node).
-2. Lists ALL the mini-steps for this session in order as a numbered checklist (e.g. "1. Create X, 2. Add Y function, 3. Wire up Z, 4. Test with ..."). Every sub-task needed to complete this node should appear here.
-3. Names the specific file(s) and function(s) involved across those steps.
+1. In 1–2 sentences, states what this session covers end-to-end.
+2. Lists ALL the mini-steps for this session as a numbered list. For each step, write the step title followed by a dash and 1–3 sentences explaining exactly what the learner will do and why — be concrete (mention specific commands, filenames, or functions). Example format:
+   1. Step title — What you'll do, why it matters, and any key detail or command.
+   2. Step title — Specific action with the exact tool/command/file involved.
+3. Names the file(s) involved across the steps.
 4. Then asks: "Does your current code match what's shown above, or have you made changes? Paste your version if it differs — then we'll start on step 1."
-Keep it concise but complete — the learner should see the full plan before starting.`
+`
     : `[Opening message for node: "${node.title}"]
 Generate a tutor opening message that:
-1. In 1–2 sentences, states what this session covers end-to-end (not just the first step — the full scope of this node).
-2. Lists ALL the mini-steps for this session in order as a numbered checklist (e.g. "1. Install X, 2. Configure Y, 3. Create Z file, 4. Verify with ..."). Every sub-task needed to complete this node should appear here.
+1. In 1–2 sentences, states what this session covers end-to-end.
+2. Lists ALL the mini-steps for this session as a numbered list. For each step, write the step title followed by a dash and 1–3 sentences explaining exactly what the learner will do and why — be concrete (mention specific commands, filenames, or functions). Example format:
+   1. Step title — What you'll do, why it matters, and any key detail or command.
+   2. Step title — Specific action with the exact tool/command/file involved.
 3. Ends with: "Let's start with step 1." and immediately gives the first concrete action.
-Keep it concise but complete — the learner should see the full plan before starting.`;
+`;
 
   const stream = await openrouter.chat.completions.create({
     model: MODEL,

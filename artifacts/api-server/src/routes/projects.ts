@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
-import { eq, and, count, sql } from "drizzle-orm";
-import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, learnerProfilesTable } from "@workspace/db";
+import { eq, and, count, sql, inArray } from "drizzle-orm";
+import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, learnerProfilesTable, chatSessionsTable, projectCodeContextTable } from "@workspace/db";
 import {
   CreateProjectBody,
   CreateProjectResponse,
@@ -17,9 +17,29 @@ import {
   GetNodeMapResponse,
 } from "@workspace/api-zod";
 import { requireAuth, getAuthUserId } from "../lib/auth";
-import { generateFramingQuestions } from "../lib/aiNodeMap";
+import { generateFramingQuestions, generateRefinedDescription } from "../lib/aiNodeMap";
 
 const router: IRouter = Router();
+
+router.post("/projects/refine-description", requireAuth, async (req, res): Promise<void> => {
+  const userId = getAuthUserId(req);
+  const { title, ideaPrompt, qa } = req.body as {
+    title?: string;
+    ideaPrompt?: string;
+    qa?: { question: string; answer: string }[];
+  };
+  if (!title?.trim() || !ideaPrompt?.trim() || !Array.isArray(qa) || qa.length === 0) {
+    res.status(400).json({ error: "title, ideaPrompt, and qa are required" });
+    return;
+  }
+  const [profile] = await db.select().from(learnerProfilesTable).where(eq(learnerProfilesTable.clerkUserId, userId));
+  try {
+    const refined = await generateRefinedDescription(title, ideaPrompt, qa, profile ?? null);
+    res.json({ description: refined });
+  } catch (err: any) {
+    res.status(500).json({ error: err?.message ?? "Failed to refine description" });
+  }
+});
 
 router.post("/projects/frame-questions", requireAuth, async (req, res): Promise<void> => {
   const userId = getAuthUserId(req);
@@ -125,9 +145,32 @@ router.delete("/projects/:projectId", requireAuth, async (req, res): Promise<voi
     return;
   }
 
-  await db
-    .delete(projectsTable)
+  const [project] = await db
+    .select()
+    .from(projectsTable)
     .where(and(eq(projectsTable.id, params.data.projectId), eq(projectsTable.clerkUserId, userId)));
+  if (!project) { res.sendStatus(404); return; }
+
+  await db.transaction(async (tx) => {
+    const [map] = await tx.select({ id: nodeMapsTable.id }).from(nodeMapsTable).where(eq(nodeMapsTable.projectId, project.id));
+
+    if (map) {
+      const nodes = await tx.select({ id: nodesTable.id }).from(nodesTable).where(eq(nodesTable.mapId, map.id));
+      const nodeIds = nodes.map((n) => n.id);
+
+      if (nodeIds.length > 0) {
+        await tx.delete(nodeEdgesTable).where(inArray(nodeEdgesTable.fromNodeId, nodeIds));
+        await tx.delete(nodeEdgesTable).where(inArray(nodeEdgesTable.toNodeId, nodeIds));
+        await tx.delete(chatSessionsTable).where(inArray(chatSessionsTable.nodeId, nodeIds));
+        await tx.delete(nodesTable).where(inArray(nodesTable.id, nodeIds));
+      }
+
+      await tx.delete(nodeMapsTable).where(eq(nodeMapsTable.id, map.id));
+    }
+
+    await tx.delete(projectCodeContextTable).where(eq(projectCodeContextTable.projectId, project.id));
+    await tx.delete(projectsTable).where(eq(projectsTable.id, project.id));
+  });
 
   res.sendStatus(204);
 });

@@ -20,11 +20,14 @@ import {
   DialogHeader,
   DialogTitle,
   DialogFooter,
+  DialogDescription,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { NodeMapCanvas } from "@/components/node-map-canvas";
 import { NodeChatPanel } from "@/components/node-chat-panel";
-import { Sparkles, RefreshCw, AlertCircle, ArrowLeft, PenLine, Loader2 } from "lucide-react";
+import { Sparkles, RefreshCw, AlertCircle, ArrowLeft, PenLine, Loader2, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export default function ProjectDetail() {
@@ -47,6 +50,12 @@ export default function ProjectDetail() {
   const [reviseDescription, setReviseDescription] = useState("");
   const [isRevising, setIsRevising] = useState(false);
   const [reviseError, setReviseError] = useState<string | null>(null);
+
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [detailsTitle, setDetailsTitle] = useState("");
+  const [detailsDescription, setDetailsDescription] = useState("");
+  const [isSavingDetails, setIsSavingDetails] = useState(false);
+  const [detailsError, setDetailsError] = useState<string | null>(null);
 
   const [panelWidth, setPanelWidth] = useState(420);
   const isDraggingRef = useRef(false);
@@ -154,6 +163,37 @@ export default function ProjectDetail() {
     }
   };
 
+  const openDetailsModal = () => {
+    setDetailsTitle(project?.title ?? "");
+    setDetailsDescription(project?.ideaPrompt ?? "");
+    setDetailsError(null);
+    setShowDetailsModal(true);
+  };
+
+  const handleSaveDetails = async () => {
+    if (!detailsTitle.trim() || isSavingDetails) return;
+    setIsSavingDetails(true);
+    setDetailsError(null);
+    try {
+      const res = await fetch(`${base}/api/projects/${projectId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: detailsTitle.trim(), ideaPrompt: detailsDescription.trim() }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Save failed" }));
+        setDetailsError(err.error ?? "Save failed");
+        return;
+      }
+      queryClient.invalidateQueries({ queryKey: getGetProjectQueryKey(projectId) });
+      setShowDetailsModal(false);
+    } catch {
+      setDetailsError("Network error. Please try again.");
+    } finally {
+      setIsSavingDetails(false);
+    }
+  };
+
   if (projectLoading) {
     return (
       <div className="p-6 md:p-10 max-w-7xl mx-auto space-y-6">
@@ -230,6 +270,16 @@ export default function ProjectDetail() {
                 </div>
               </div>
             )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={openDetailsModal}
+              className="font-mono text-xs text-muted-foreground hover:text-foreground h-8 px-2"
+              title="View / edit project details"
+            >
+              <FileText className="w-3.5 h-3.5 mr-1.5" />
+              Details
+            </Button>
             {hasMap && (
               <Button
                 variant="ghost"
@@ -375,6 +425,68 @@ export default function ProjectDetail() {
           </div>
         )}
       </div>
+
+      <Dialog open={showDetailsModal} onOpenChange={setShowDetailsModal}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-mono">Project Details</DialogTitle>
+            <DialogDescription>
+              View and edit your project title and description.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="details-title" className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Title
+              </Label>
+              <Input
+                id="details-title"
+                value={detailsTitle}
+                onChange={(e) => setDetailsTitle(e.target.value)}
+                className="font-mono text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="details-description" className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Description
+              </Label>
+              <Textarea
+                id="details-description"
+                value={detailsDescription}
+                onChange={(e) => setDetailsDescription(e.target.value)}
+                rows={6}
+                className="font-mono text-sm resize-none leading-relaxed"
+              />
+            </div>
+            {detailsError && (
+              <p className="text-xs text-destructive">{detailsError}</p>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setShowDetailsModal(false); setDetailsError(null); }}
+              disabled={isSavingDetails}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSaveDetails}
+              disabled={!detailsTitle.trim() || isSavingDetails}
+              className="font-mono"
+            >
+              {isSavingDetails ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={showReviseModal} onOpenChange={setShowReviseModal}>
         <DialogContent className="max-w-lg">

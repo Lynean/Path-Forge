@@ -16,6 +16,7 @@ import "@xyflow/react/dist/style.css";
 import { useLocation } from "wouter";
 import type { Node as ApiNode, NodeEdge } from "@workspace/api-client-react";
 import { CheckCircle, Lock, Circle, Sparkles } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 interface NodeCardProps {
   data: {
@@ -33,64 +34,81 @@ function NodeCard({ data }: NodeCardProps) {
   const isClickable = isAvailable || isCompleted;
 
   return (
-    <div
-      onClick={isClickable ? onClick : undefined}
-      data-testid={`node-card-${node.id}`}
-      className={[
-        "relative w-52 rounded-xl border p-3 transition-all duration-150 select-none",
-        isSelected
-          ? "bg-primary/15 border-primary shadow-lg shadow-primary/25 ring-1 ring-primary"
-          : isAvailable
-          ? "cursor-pointer bg-card border-primary/60 shadow-lg shadow-primary/10 hover:border-primary hover:shadow-primary/20"
-          : isCompleted
-          ? "cursor-pointer bg-primary/10 border-primary/50 hover:border-primary/70"
-          : "cursor-not-allowed bg-muted/30 border-border/40 opacity-50",
-      ].join(" ")}
-    >
-      <Handle
-        type="target"
-        position={Position.Top}
-        className="!bg-border !border-border !w-2 !h-2"
-      />
+    <TooltipProvider delayDuration={500}>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            onClick={isClickable ? onClick : undefined}
+            data-testid={`node-card-${node.id}`}
+            className={[
+              "relative w-52 rounded-xl border p-3 transition-all duration-150 select-none",
+              isSelected
+                ? "bg-primary/15 border-primary shadow-xl shadow-primary/40 ring-1 ring-primary"
+                : isAvailable
+                ? "cursor-pointer bg-card border-primary/60 shadow-lg shadow-primary/10 hover:border-primary hover:shadow-xl hover:shadow-primary/50"
+                : isCompleted
+                ? "cursor-pointer bg-primary/10 border-primary/50 hover:border-primary/70 hover:shadow-lg hover:shadow-primary/30"
+                : "cursor-default bg-muted/20 border-border/50 opacity-60 hover:opacity-80 hover:border-border hover:shadow-md",
+            ].join(" ")}
+          >
+            <Handle
+              type="target"
+              position={Position.Top}
+              className="!bg-border !border-border !w-2 !h-2"
+            />
 
-      <div className="flex items-start gap-2">
-        <div className="mt-0.5 shrink-0">
-          {isCompleted ? (
-            <CheckCircle className="w-4 h-4 text-primary" />
-          ) : isAvailable ? (
-            <Circle className="w-4 h-4 text-primary/70" />
-          ) : (
-            <Lock className="w-4 h-4 text-muted-foreground/50" />
-          )}
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-mono font-semibold leading-tight truncate">
-            {node.title}
-          </p>
-          {node.summary ? (
-            <p className="text-xs text-primary/70 mt-1 line-clamp-1 leading-relaxed italic">
-              {node.summary}
-            </p>
-          ) : (
-            <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
-              {node.brief}
-            </p>
-          )}
-          {node.isExtra && (
-            <div className="flex items-center gap-0.5 mt-1">
-              <Sparkles className="w-2.5 h-2.5 text-primary/60" />
-              <span className="text-[10px] text-primary/60 font-mono">extra</span>
+            <div className="flex items-start gap-2">
+              <div className="mt-0.5 shrink-0">
+                {isCompleted ? (
+                  <CheckCircle className="w-4 h-4 text-primary" />
+                ) : isAvailable ? (
+                  <Circle className="w-4 h-4 text-primary/70" />
+                ) : (
+                  <Lock className="w-4 h-4 text-muted-foreground/50" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className="text-sm font-mono font-semibold leading-tight truncate">
+                  {node.title}
+                </p>
+                {node.summary ? (
+                  <p className="text-xs text-primary/70 mt-1 line-clamp-1 leading-relaxed italic">
+                    {node.summary}
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
+                    {node.brief}
+                  </p>
+                )}
+                {node.isExtra && (
+                  <div className="flex items-center gap-0.5 mt-1">
+                    <Sparkles className="w-2.5 h-2.5 text-primary/60" />
+                    <span className="text-[10px] text-primary/60 font-mono">extra</span>
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </div>
-      </div>
 
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        className="!bg-border !border-border !w-2 !h-2"
-      />
-    </div>
+            <Handle
+              type="source"
+              position={Position.Bottom}
+              className="!bg-border !border-border !w-2 !h-2"
+            />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="left" className="max-w-64 space-y-1.5">
+          <p className="font-mono font-semibold text-xs">{node.title}</p>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            {node.summary ?? node.brief}
+          </p>
+          {isLocked && (
+            <p className="text-[10px] text-muted-foreground font-mono border-t border-border/40 pt-1 mt-0.5">
+              Complete prerequisites to unlock
+            </p>
+          )}
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   );
 }
 

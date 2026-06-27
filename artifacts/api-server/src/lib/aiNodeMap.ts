@@ -51,7 +51,7 @@ Project idea: "${ideaPrompt}"
 Learner profile:
 ${profileContext}
 
-Generate 3–5 multiple-choice questions that will sharpen the project scope so the learning path is maximally relevant. Focus on:
+Generate 5–8 multiple-choice questions that will sharpen the project scope so the learning path is maximally relevant. Focus on:
 - The specific outcome they want (learn how it works? ship something? compete? demo?)
 - Technical constraints or preferences (language, framework, platform, hardware)
 - Scope and complexity expectations
@@ -82,6 +82,57 @@ Respond ONLY with valid JSON, no markdown:
     throw new Error("Invalid framing questions response");
   }
   return parsed;
+}
+
+export async function generateRefinedDescription(
+  title: string,
+  originalDescription: string,
+  qa: { question: string; answer: string }[],
+  profile: LearnerProfile | null
+): Promise<string> {
+  const profileContext = profile
+    ? [
+        profile.age ? `Age: ${profile.age}` : null,
+        profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
+        profile.major ? `Field/Major: ${profile.major}` : null,
+        profile.interests ? `Interests: ${profile.interests}` : null,
+        profile.experience ? `Experience: ${profile.experience}` : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "No profile available.";
+
+  const qaText = qa.map(({ question, answer }) => `Q: ${question}\nA: ${answer}`).join("\n\n");
+
+  const prompt = `You are rewriting a project description to incorporate the learner's specific goals and context.
+
+Project title: "${title}"
+Original description: "${originalDescription}"
+
+Learner answered these clarifying questions:
+${qaText}
+
+Learner profile:
+${profileContext}
+
+Rewrite the project description as a single cohesive paragraph (4–7 sentences) that naturally weaves in everything revealed by the answers. Requirements:
+- Keep the core project idea intact
+- Be specific and concrete — reference the exact goals, stack, constraints, and scope the learner chose
+- Written in first person ("I want to build...")
+- Sound like the learner wrote it themselves — not like a Q&A summary
+- No bullet points, no section headers — a single flowing paragraph
+
+Return ONLY the rewritten description, no quotes, no preamble.`;
+
+  const response = await openrouter.chat.completions.create({
+    model: MODEL,
+    max_tokens: 512,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const content = response.choices[0]?.message?.content?.trim();
+  if (!content) throw new Error("Empty AI response for description refinement");
+  return content;
 }
 
 export async function generateNodeMap(

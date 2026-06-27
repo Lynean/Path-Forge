@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   useGetNodeChat,
   useUpdateNodeStatus,
@@ -23,8 +23,10 @@ import {
   Lock,
   Check,
   ChevronDown,
+  ArrowRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -81,6 +83,16 @@ function parseMinistepsFromContent(content: string): string[] {
   return steps.length >= 2 ? steps : [];
 }
 
+function parseStepParts(step: string): { name: string; description: string } {
+  // "**Name** - description" or "**Name**: description"
+  const boldMatch = step.match(/^\*\*([^*]+)\*\*\s*[-–—:]\s*([\s\S]+)/);
+  if (boldMatch) return { name: boldMatch[1].trim(), description: boldMatch[2].trim() };
+  // "Name - description" where name is short
+  const dashMatch = step.match(/^([^-–—]{2,55})\s[-–—]\s([\s\S]+)/);
+  if (dashMatch) return { name: dashMatch[1].trim(), description: dashMatch[2].trim() };
+  return { name: step, description: "" };
+}
+
 function MarkdownContent({ content }: { content: string }) {
   return (
     <div className="prose prose-sm prose-invert max-w-none [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 prose-code:before:content-none prose-code:after:content-none">
@@ -91,10 +103,25 @@ function MarkdownContent({ content }: { content: string }) {
   );
 }
 
-function SessionChecklist({ steps, checked }: { steps: string[]; checked: Set<number> }) {
+function SessionChecklist({
+  steps,
+  checked,
+  onToggle,
+  onNextStep,
+  isStreaming,
+}: {
+  steps: string[];
+  checked: Set<number>;
+  onToggle: (index: number) => void;
+  onNextStep?: () => void;
+  isStreaming?: boolean;
+}) {
   const [expanded, setExpanded] = useState(true);
   if (steps.length < 2) return null;
   const doneCount = checked.size;
+  const nextIndex = steps.findIndex((_, i) => !checked.has(i));
+  const parsedSteps = steps.map(parseStepParts);
+  const hasDescriptions = parsedSteps.some((s) => s.description.length > 0);
 
   return (
     <div className="border-b border-border shrink-0">
@@ -126,27 +153,64 @@ function SessionChecklist({ steps, checked }: { steps: string[]; checked: Set<nu
         </div>
       </button>
       {expanded && (
-        <div className="px-4 pb-3 pt-1 space-y-1.5">
-          {steps.map((step, i) => (
-            <div key={i} className="flex items-start gap-2.5">
-              <div
-                className={cn(
-                  "w-3.5 h-3.5 rounded-sm border shrink-0 mt-0.5 flex items-center justify-center transition-colors",
-                  checked.has(i) ? "bg-primary border-primary" : "border-border"
+        <div className="px-4 pb-2 pt-1 space-y-1.5">
+          <TooltipProvider delayDuration={400}>
+            {parsedSteps.map(({ name, description }, i) => (
+              <Tooltip key={i}>
+                <TooltipTrigger asChild>
+                  <button
+                    onClick={() => onToggle(i)}
+                    className="w-full flex items-start gap-2.5 text-left group"
+                  >
+                    <div
+                      className={cn(
+                        "w-3.5 h-3.5 rounded-sm border shrink-0 mt-0.5 flex items-center justify-center transition-colors",
+                        checked.has(i)
+                          ? "bg-primary border-primary"
+                          : "border-border group-hover:border-primary/60"
+                      )}
+                    >
+                      {checked.has(i) && <Check className="w-2 h-2 text-primary-foreground" />}
+                    </div>
+                    <span
+                      className={cn(
+                        "text-xs leading-relaxed transition-colors",
+                        checked.has(i)
+                          ? "line-through text-muted-foreground"
+                          : "text-foreground/80 group-hover:text-foreground"
+                      )}
+                    >
+                      {name}
+                    </span>
+                  </button>
+                </TooltipTrigger>
+                {description && (
+                  <TooltipContent side="right" className="max-w-xs text-xs leading-relaxed">
+                    <MarkdownContent content={description} />
+                  </TooltipContent>
                 )}
-              >
-                {checked.has(i) && <Check className="w-2 h-2 text-primary-foreground" />}
-              </div>
-              <span
-                className={cn(
-                  "text-xs leading-relaxed",
-                  checked.has(i) ? "line-through text-muted-foreground" : "text-foreground/80"
-                )}
-              >
-                {step}
+              </Tooltip>
+            ))}
+          </TooltipProvider>
+          {hasDescriptions && (
+            <p className="text-[9px] text-muted-foreground/50 font-mono text-right pt-0.5">
+              Hover to see details
+            </p>
+          )}
+          {nextIndex >= 0 && onNextStep && (
+            <button
+              onClick={onNextStep}
+              disabled={isStreaming}
+              className="mt-1 w-full flex items-center justify-end gap-1 text-[11px] font-mono text-primary hover:text-primary/70 py-0.5 disabled:opacity-40 transition-colors"
+            >
+              <span className="truncate max-w-[80%]">
+                {parsedSteps[nextIndex].name.length > 40
+                  ? parsedSteps[nextIndex].name.slice(0, 40) + "…"
+                  : parsedSteps[nextIndex].name}
               </span>
-            </div>
-          ))}
+              <ArrowRight className="w-3 h-3 shrink-0" />
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -219,7 +283,15 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
   const [isSpawning, setIsSpawning] = useState(false);
   const [completedSummary, setCompletedSummary] = useState<string | null>(null);
   const [ministeps, setMinisteps] = useState<string[]>([]);
-  const [checkedSteps, setCheckedSteps] = useState<Set<number>>(new Set());
+  // AI-confirmed done (from [STEP_DONE:N] markers in history / SSE events)
+  const [aiCheckedSteps, setAiCheckedSteps] = useState<Set<number>>(new Set());
+  // User-manually-toggled done (local only, not persisted)
+  const [manualCheckedSteps, setManualCheckedSteps] = useState<Set<number>>(new Set());
+  // Combined view used everywhere
+  const checkedSteps = useMemo(
+    () => new Set([...aiCheckedSteps, ...manualCheckedSteps]),
+    [aiCheckedSteps, manualCheckedSteps]
+  );
   const ministepsParsed = useRef(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -321,7 +393,8 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
   useEffect(() => {
     ministepsParsed.current = false;
     setMinisteps([]);
-    setCheckedSteps(new Set());
+    setAiCheckedSteps(new Set());
+    setManualCheckedSteps(new Set());
     setLocalMessages([]);
     setLocalMessagesLoaded(false);
   }, [nodeId]);
@@ -337,7 +410,7 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
     }
   }, [chatHistory, localMessagesLoaded]);
 
-  // Parse ministeps from opening message; reconstruct checked state from all stored messages
+  // Parse ministeps from opening message; reconstruct AI-checked state from all stored messages
   useEffect(() => {
     if (localMessages.length === 0) return;
 
@@ -352,14 +425,15 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
       }
     }
 
-    const completed = new Set<number>();
+    // Only rebuild AI-confirmed steps — never touch manualCheckedSteps
+    const aiDone = new Set<number>();
     for (const msg of localMessages) {
       if (msg.role !== "assistant") continue;
       for (const match of msg.content.matchAll(/\[STEP_DONE:(\d+)\]/g)) {
-        completed.add(parseInt(match[1], 10) - 1);
+        aiDone.add(parseInt(match[1], 10) - 1);
       }
     }
-    setCheckedSteps(completed);
+    setAiCheckedSteps(aiDone);
   }, [localMessages]);
 
   useEffect(() => {
@@ -376,8 +450,62 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
   const handleSend = async () => {
     const content = input.trim();
     if (!content || isStreaming) return;
-
     setInput("");
+    await sendMessage(content);
+  };
+
+  const handleSpawn = async () => {
+    const topic = spawnTopic.trim();
+    if (!topic || isSpawning) return;
+
+    setIsSpawning(true);
+    try {
+      const res = await fetch(
+        `${base}/api/projects/${projectId}/nodes/${nodeId}/spawn`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic }),
+        }
+      );
+      if (res.ok) {
+        queryClient.invalidateQueries({ queryKey: getGetNodeMapQueryKey(projectId) });
+        queryClient.invalidateQueries({ queryKey: getGetProjectStatsQueryKey(projectId) });
+        onMapUpdate();
+        setSpawnTopic("");
+        setShowSpawnInput(false);
+      }
+    } catch {}
+    finally {
+      setIsSpawning(false);
+    }
+  };
+
+  const isCompleted = node.status === "completed";
+  const isLocked = node.status === "locked";
+
+  const allStepsDone = ministeps.length === 0 || checkedSteps.size >= ministeps.length;
+  const nextUncheckedIndex = ministeps.findIndex((_, i) => !checkedSteps.has(i));
+
+  const handleToggleStep = (index: number) => {
+    setManualCheckedSteps((prev) => {
+      const next = new Set(prev);
+      // If AI already confirmed it, don't let manual toggle remove it
+      if (aiCheckedSteps.has(index)) return prev;
+      if (next.has(index)) next.delete(index);
+      else next.add(index);
+      return next;
+    });
+  };
+
+  const handleMarkComplete = () => {
+    if (!node || node.status === "completed" || node.status === "locked") return;
+    updateStatus.mutate({ projectId, nodeId, data: { status: "completed" } });
+  };
+
+  const sendMessage = async (content: string) => {
+    if (!content || isStreaming) return;
+
     const userMsg: ChatMessage = { role: "user", content, createdAt: new Date().toISOString() };
     setLocalMessages((prev) => [...prev, userMsg]);
     setIsStreaming(true);
@@ -391,7 +519,7 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
         {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content }),
+          body: JSON.stringify({ content, completedStepIndices: [...checkedSteps] }),
           signal: abortRef.current.signal,
         }
       );
@@ -418,7 +546,7 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
                 fullContent += parsed.content;
                 setStreamingContent(fullContent);
               } else if (parsed.type === "step_done" && typeof parsed.stepIndex === "number") {
-                setCheckedSteps((prev) => new Set([...prev, parsed.stepIndex as number]));
+                setAiCheckedSteps((prev) => new Set([...prev, parsed.stepIndex as number]));
               } else if (parsed.type === "done") {
                 // message complete
               } else if (parsed.type === "extra_node_spawned") {
@@ -461,36 +589,9 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
     }
   };
 
-  const handleSpawn = async () => {
-    const topic = spawnTopic.trim();
-    if (!topic || isSpawning) return;
-
-    setIsSpawning(true);
-    try {
-      const res = await fetch(
-        `${base}/api/projects/${projectId}/nodes/${nodeId}/spawn`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ topic }),
-        }
-      );
-      if (res.ok) {
-        queryClient.invalidateQueries({ queryKey: getGetNodeMapQueryKey(projectId) });
-        queryClient.invalidateQueries({ queryKey: getGetProjectStatsQueryKey(projectId) });
-        onMapUpdate();
-        setSpawnTopic("");
-        setShowSpawnInput(false);
-      }
-    } catch {}
-    finally {
-      setIsSpawning(false);
-    }
-  };
-
-  const handleMarkComplete = () => {
-    if (!node || node.status === "completed" || node.status === "locked") return;
-    updateStatus.mutate({ projectId, nodeId, data: { status: "completed" } });
+  const handleNextStep = () => {
+    if (nextUncheckedIndex < 0 || isStreaming || isLocked || isCompleted) return;
+    sendMessage(`Let's move on to step ${nextUncheckedIndex + 1}: ${ministeps[nextUncheckedIndex]}`);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -499,9 +600,6 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
       handleSend();
     }
   };
-
-  const isCompleted = node.status === "completed";
-  const isLocked = node.status === "locked";
 
   return (
     <div className="flex flex-col flex-1 min-h-0 overflow-hidden bg-background">
@@ -543,7 +641,8 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
               <Button
                 size="sm"
                 onClick={handleMarkComplete}
-                disabled={updateStatus.isPending}
+                disabled={updateStatus.isPending || !allStepsDone}
+                title={!allStepsDone ? "Complete all session steps first" : undefined}
                 data-testid="button-mark-complete"
                 className="h-7 text-xs px-2 font-mono"
               >
@@ -614,7 +713,13 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
         )}
       </div>
 
-      <SessionChecklist steps={ministeps} checked={checkedSteps} />
+      <SessionChecklist
+        steps={ministeps}
+        checked={checkedSteps}
+        onToggle={handleToggleStep}
+        onNextStep={!isCompleted && !isLocked ? handleNextStep : undefined}
+        isStreaming={isStreaming}
+      />
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
         {chatLoading && !localMessagesLoaded ? (
