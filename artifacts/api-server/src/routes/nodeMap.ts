@@ -344,6 +344,27 @@ async function cleanupFuturePlanNodes(mapId: number, description: string): Promi
   await deleteFutureNodesAndRewire([...nodesToDelete.values()], replacementByDeletedId, edges);
 }
 
+async function unlockReadyNodes(mapId: number): Promise<void> {
+  const nodes = await db.select().from(nodesTable).where(eq(nodesTable.mapId, mapId));
+  const nodeIds = nodes.map((node) => node.id);
+  if (nodeIds.length === 0) return;
+
+  const edges = await db.select().from(nodeEdgesTable).where(inArray(nodeEdgesTable.fromNodeId, nodeIds));
+  const completedIds = new Set(nodes.filter((node) => node.status === "completed").map((node) => node.id));
+  const lockedNodes = nodes.filter((node) => node.status === "locked");
+
+  for (const node of lockedNodes) {
+    const prereqIds = edges
+      .filter((edge) => edge.toNodeId === node.id)
+      .map((edge) => edge.fromNodeId);
+    if (prereqIds.length === 0 || prereqIds.every((id) => completedIds.has(id))) {
+      await db.update(nodesTable)
+        .set({ status: "available", updatedAt: new Date().toISOString() })
+        .where(eq(nodesTable.id, node.id));
+    }
+  }
+}
+
 router.post("/projects/:projectId/generate-map", requireAuth, async (req, res): Promise<void> => {
   const userId = getAuthUserId(req);
   const params = GenerateNodeMapParams.safeParse(req.params);
@@ -831,6 +852,7 @@ router.post("/projects/:projectId/revise-plan", requireAuth, async (req, res): P
 
   await repositionCompletedIntegrationCheckpoints(map.id, body.data.description);
   await cleanupFuturePlanNodes(map.id, body.data.description);
+  await unlockReadyNodes(map.id);
 
   const updatedNodes = await db.select().from(nodesTable).where(eq(nodesTable.mapId, map.id)).orderBy(nodesTable.createdAt);
   const updatedNodeIds = updatedNodes.map((n) => n.id);
@@ -852,6 +874,8 @@ router.get("/projects/:projectId/map", requireAuth, async (req, res): Promise<vo
 
   const [map] = await db.select().from(nodeMapsTable).where(eq(nodeMapsTable.projectId, projectId));
   if (!map) { res.status(404).json({ error: "Node map not found" }); return; }
+
+  await unlockReadyNodes(map.id);
 
   const nodes = await db.select().from(nodesTable).where(eq(nodesTable.mapId, map.id)).orderBy(nodesTable.createdAt);
   const nodeIds = nodes.map((n) => n.id);
