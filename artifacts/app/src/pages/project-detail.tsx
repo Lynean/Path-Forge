@@ -496,7 +496,9 @@ export default function ProjectDetail() {
           <div className="space-y-3 py-2">
             <p className="text-sm text-muted-foreground leading-relaxed">
               Describe how you'd like to change your learning direction. AI will rewrite future
-              (not yet completed) nodes accordingly while keeping your progress.
+              (not yet completed) nodes accordingly while keeping your progress. Completed nodes
+              stay as historical evidence; use the description to correct the remaining path and
+              dependency semantics.
             </p>
             <Textarea
               value={reviseDescription}

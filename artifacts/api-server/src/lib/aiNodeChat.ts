@@ -529,6 +529,10 @@ Revise the future nodes to better match this direction. Rules:
 7. Nodes should still lead toward the same final project goal.
 8. Each node brief must describe a concrete outcome — what the learner will build or demonstrate, not just "understand".
 9. SKIP topics the learner already knows based on their profile — do not add nodes for things they've stated as prior knowledge.
+10. Treat explicit sequencing in the learner's requested change as authoritative for all future nodes.
+11. Do not put validation/checkpoint work before the design/build/provisioning work it validates. Docker, deployment, test, benchmark, or UAT nodes should be downstream integration checkpoints unless the learner explicitly says they are validating an already-existing system.
+12. For rebuild, migration, audit, or "recreate from existing project" work, future nodes should begin with source documentation/code analysis and architecture extraction before scaffold, implementation, provisioning, workflow import, or infrastructure validation.
+13. If completed nodes are semantically out of order, preserve them as completed historical evidence, but make the remaining path explicitly correct. Do not make future nodes depend on a completed checkpoint that the learner says should have occurred later.
 
 Respond ONLY with valid JSON, no markdown:
 {
