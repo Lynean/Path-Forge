@@ -1,7 +1,7 @@
 import { openrouter } from "@workspace/integrations-openrouter-ai";
 import type { LearnerProfile } from "@workspace/db";
 
-const MODEL = "google/gemini-2.5-flash-lite";
+const MODEL = "google/gemini-3.1-flash-lite";
 
 interface AINode {
   id: string;
@@ -170,6 +170,7 @@ Rules for the node map:
   - Focus the map on the GAPS between their current knowledge and what the project requires.
 - Cover the relevant technology stack and concepts needed to build the project (e.g., data structures, networking, robotics frameworks, web APIs, etc.).
 - Order thoughtfully: fundamentals before advanced topics, independent skills in parallel branches, theory paired with hands-on implementation.
+- Avoid duplicate or near-duplicate nodes. If two candidate nodes produce the same artifact or verify the same outcome, consolidate them into one focused node.
 - Treat explicit sequencing in the project description as authoritative. If the learner says one activity must come first, that activity must be a root or upstream prerequisite.
 - Do not confuse validation/checkpoint tasks with starting tasks. Environment, Docker, deployment, benchmark, or acceptance-test validation should appear only after the artifacts being validated have been designed or built, unless the learner explicitly asks to validate an existing system first.
 - For rebuild, migration, audit, or "recreate from existing project" requests, the first nodes should inspect source documentation/code and extract architecture/contracts before implementation or infrastructure validation.

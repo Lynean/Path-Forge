@@ -1,7 +1,7 @@
 import { openrouter } from "@workspace/integrations-openrouter-ai";
 import type { LearnerProfile, Node as DbNode, CodeFile } from "@workspace/db";
 
-const MODEL = "google/gemini-2.5-flash-lite";
+const MODEL = "google/gemini-3.1-flash-lite";
 
 export type { CodeFile };
 
@@ -533,6 +533,8 @@ Revise the future nodes to better match this direction. Rules:
 11. Do not put validation/checkpoint work before the design/build/provisioning work it validates. Docker, deployment, test, benchmark, or UAT nodes should be downstream integration checkpoints unless the learner explicitly says they are validating an already-existing system.
 12. For rebuild, migration, audit, or "recreate from existing project" work, future nodes should begin with source documentation/code analysis and architecture extraction before scaffold, implementation, provisioning, workflow import, or infrastructure validation.
 13. If completed nodes are semantically out of order, preserve them as completed historical evidence, but make the remaining path explicitly correct. Do not make future nodes depend on a completed checkpoint that the learner says should have occurred later.
+14. Do not create duplicate or near-duplicate future nodes. If two future nodes cover the same outcome (for example provisioning/configuring NocoDB, importing/activating n8n, wiring n8n workflow logic, refactoring, deployment readiness, testing, or documentation), consolidate them into one node and reuse the most appropriate existing node ID.
+15. When aligning with a real implementation, remove future nodes whose work is already represented by completed nodes or completed external evidence, unless they are explicitly about final audit or verification.
 
 Respond ONLY with valid JSON, no markdown:
 {

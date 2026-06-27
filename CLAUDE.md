@@ -46,7 +46,7 @@ pnpm --filter @workspace/db run push
 
 ### AI Integration
 
-Single model: `google/gemini-2.5-flash-lite` via OpenRouter. Token limits per task:
+Single model: `google/gemini-3.1-flash-lite` via OpenRouter. Token limits per task:
 - Node map generation (`aiNodeMap.ts`): 8192 tokens
 - Chat streaming (`aiNodeChat.ts`): 2048 tokens
 - Opening message: 1024 tokens
