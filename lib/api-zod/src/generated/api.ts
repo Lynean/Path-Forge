@@ -29,6 +29,7 @@ export const GetProfileResponse = zod.object({
   "major": zod.string().nullish(),
   "interests": zod.string(),
   "experience": zod.string(),
+  "preferredLanguage": zod.string().nullish(),
   "isComplete": zod.boolean(),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
@@ -44,6 +45,7 @@ export const UpsertProfileBody = zod.object({
   "major": zod.string().nullish(),
   "interests": zod.string(),
   "experience": zod.string(),
+  "preferredLanguage": zod.string().nullish(),
   "isComplete": zod.boolean()
 })
 
@@ -55,6 +57,7 @@ export const UpsertProfileResponse = zod.object({
   "major": zod.string().nullish(),
   "interests": zod.string(),
   "experience": zod.string(),
+  "preferredLanguage": zod.string().nullish(),
   "isComplete": zod.boolean(),
   "createdAt": zod.string(),
   "updatedAt": zod.string()

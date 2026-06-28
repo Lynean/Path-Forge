@@ -481,6 +481,8 @@ components:
           type: string
         experience:
           type: string
+        preferredLanguage:
+          type: ["string", "null"]
         isComplete:
           type: boolean
         createdAt:
@@ -509,6 +511,8 @@ components:
           type: string
         experience:
           type: string
+        preferredLanguage:
+          type: ["string", "null"]
         isComplete:
           type: boolean
       required:

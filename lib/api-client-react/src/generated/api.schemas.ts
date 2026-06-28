@@ -24,6 +24,8 @@ export interface LearnerProfile {
   major?: string | null;
   interests: string;
   experience: string;
+  /** @nullable */
+  preferredLanguage?: string | null;
   isComplete: boolean;
   createdAt: string;
   updatedAt: string;
@@ -38,6 +40,8 @@ export interface LearnerProfileInput {
   major?: string | null;
   interests: string;
   experience: string;
+  /** @nullable */
+  preferredLanguage?: string | null;
   isComplete: boolean;
 }
 

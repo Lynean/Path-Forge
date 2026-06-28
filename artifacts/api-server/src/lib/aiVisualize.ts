@@ -10,6 +10,7 @@ Rules:
 - Animate or make interactive where it helps understanding. Canvas, CSS animations, and vanilla JS are all fine.
 - Keep it minimal and clear — no decorative chrome, no legends unless needed.
 - Calibrate complexity to the learner's level: beginner = step-by-step with labels; advanced = denser, more abstract.
+- If a preferred language is specified, all text labels and UI copy inside the visualization must be in that language. Code and variable names stay in English.
 - CRITICAL: Your entire response must be raw HTML starting with <!DOCTYPE html> or <html>. Do NOT wrap in markdown code fences. Do NOT write any explanation before or after. First character of your response must be '<'.`;
 
 export async function* streamVisualization(
@@ -22,6 +23,7 @@ export async function* streamVisualization(
         profile.experience ? `Experience: ${profile.experience}` : null,
         profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
         profile.major ? `Major: ${profile.major}` : null,
+        profile.preferredLanguage ? `Preferred language for labels: ${profile.preferredLanguage}` : null,
       ]
         .filter(Boolean)
         .join(" | ")

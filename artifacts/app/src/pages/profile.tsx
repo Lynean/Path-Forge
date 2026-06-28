@@ -17,7 +17,8 @@ export default function Profile() {
     educationLevel: "",
     major: "",
     interests: "",
-    experience: ""
+    experience: "",
+    preferredLanguage: ""
   });
 
   useEffect(() => {
@@ -27,7 +28,8 @@ export default function Profile() {
         educationLevel: profile.educationLevel || "",
         major: profile.major || "",
         interests: profile.interests || "",
-        experience: profile.experience || ""
+        experience: profile.experience || "",
+        preferredLanguage: profile.preferredLanguage || ""
       });
     }
   }, [profile]);
@@ -42,6 +44,7 @@ export default function Profile() {
           major: formData.major || null,
           interests: formData.interests,
           experience: formData.experience,
+          preferredLanguage: formData.preferredLanguage || null,
           isComplete: true
         }
       },
@@ -79,6 +82,34 @@ export default function Profile() {
                 <SelectItem value="PhD">PhD</SelectItem>
                 <SelectItem value="Self-taught">Self-taught</SelectItem>
                 <SelectItem value="Other">Other</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <div className="grid md:grid-cols-2 gap-6">
+          <div className="space-y-2">
+            <Label>Preferred Language</Label>
+            <Select value={formData.preferredLanguage} onValueChange={(val) => setFormData({ ...formData, preferredLanguage: val })}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select language" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="English">English</SelectItem>
+                <SelectItem value="Vietnamese">Vietnamese</SelectItem>
+                <SelectItem value="Chinese (Simplified)">Chinese (Simplified)</SelectItem>
+                <SelectItem value="Chinese (Traditional)">Chinese (Traditional)</SelectItem>
+                <SelectItem value="Spanish">Spanish</SelectItem>
+                <SelectItem value="French">French</SelectItem>
+                <SelectItem value="German">German</SelectItem>
+                <SelectItem value="Japanese">Japanese</SelectItem>
+                <SelectItem value="Korean">Korean</SelectItem>
+                <SelectItem value="Portuguese">Portuguese</SelectItem>
+                <SelectItem value="Arabic">Arabic</SelectItem>
+                <SelectItem value="Hindi">Hindi</SelectItem>
+                <SelectItem value="Indonesian">Indonesian</SelectItem>
+                <SelectItem value="Thai">Thai</SelectItem>
+                <SelectItem value="Russian">Russian</SelectItem>
               </SelectContent>
             </Select>
           </div>

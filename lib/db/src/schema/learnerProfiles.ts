@@ -10,6 +10,7 @@ export const learnerProfilesTable = pgTable("learner_profiles", {
   major: text("major"),
   interests: text("interests").notNull().default(""),
   experience: text("experience").notNull().default(""),
+  preferredLanguage: text("preferred_language"),
   isComplete: boolean("is_complete").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow().$onUpdate(() => new Date().toISOString()),

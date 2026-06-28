@@ -42,9 +42,16 @@ function buildProfileContext(profile: LearnerProfile | null): string {
     profile.major ? `Field/Major: ${profile.major}` : null,
     profile.interests ? `Interests: ${profile.interests}` : null,
     profile.experience ? `Experience: ${profile.experience}` : null,
+    profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+function getLanguageInstruction(profile: LearnerProfile | null): string {
+  const lang = profile?.preferredLanguage;
+  if (!lang || lang === "English") return "";
+  return `\nIMPORTANT: Respond entirely in ${lang}. Code, variable names, and technical terms may stay in English, but all explanations, questions, and prose must be in ${lang}.`;
 }
 
 function buildCodeContextSection(files: CodeFile[]): string {
@@ -275,7 +282,7 @@ ${teachingApproachSection}
 
 12. Use markdown for code (with proper language tags), formulas, bullet lists, and bold key terms. For hardware, use pin names and register values exactly as they appear in the datasheet.
 
-13. Tone: direct and technical, like a senior practitioner actively working alongside the learner on their specific project. No cheerleading, no hedging, no unnecessary caveats.`;
+13. Tone: direct and technical, like a senior practitioner actively working alongside the learner on their specific project. No cheerleading, no hedging, no unnecessary caveats.${getLanguageInstruction(profile)}`;
 }
 
 export async function extractCodeContextUpdates(
@@ -490,12 +497,15 @@ OR
 export async function generateNodeSummary(
   node: DbNode,
   project: { title: string; ideaPrompt: string },
-  chatHistory: ChatMessage[]
+  chatHistory: ChatMessage[],
+  profile?: LearnerProfile | null
 ): Promise<string> {
   const conversationSample = chatHistory
     .slice(-6)
     .map((m) => `${m.role === "user" ? "Learner" : "Tutor"}: ${m.content.slice(0, 300)}`)
     .join("\n");
+
+  const langNote = getLanguageInstruction(profile ?? null);
 
   const prompt = `Based on this node's content and learning conversation, write a ONE-LINE summary (max 15 words) of what was learned.
 
@@ -505,7 +515,7 @@ Project: "${project.title}"
 Recent conversation:
 ${conversationSample}
 
-Write a crisp one-liner summary of the key takeaway or skill gained. Start with a verb. No quotes.`;
+Write a crisp one-liner summary of the key takeaway or skill gained. Start with a verb. No quotes.${langNote}`;
 
   try {
     const response = await openrouter.chat.completions.create({

@@ -3,6 +3,12 @@ import type { LearnerProfile } from "@workspace/db";
 
 const MODEL = "google/gemini-3.1-flash-lite";
 
+function getLangInstruction(profile: LearnerProfile | null): string {
+  const lang = profile?.preferredLanguage;
+  if (!lang || lang === "English") return "";
+  return `\nIMPORTANT: All human-readable text (questions, descriptions, node briefs, option text) must be written in ${lang}. Node titles and code/technical identifiers must stay in English.`;
+}
+
 type ProjectType =
   | "algorithm"
   | "math-impl"
@@ -130,10 +136,13 @@ export async function generateFramingQuestions(
         profile.major ? `Field/Major: ${profile.major}` : null,
         profile.interests ? `Interests: ${profile.interests}` : null,
         profile.experience ? `Experience: ${profile.experience}` : null,
+        profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
       ]
         .filter(Boolean)
         .join("\n")
     : "No profile available.";
+
+  const langInstruction = getLangInstruction(profile);
 
   const prompt = `You are helping a learner clarify their project before generating a personalized learning path.
 
@@ -157,7 +166,7 @@ Rules:
 - Skip questions whose answers are already clear from the idea description or profile
 
 Respond ONLY with valid JSON, no markdown:
-{"questions": [{"id": "q1", "question": "...", "options": ["...", "...", "..."]}, ...]}`;
+{"questions": [{"id": "q1", "question": "...", "options": ["...", "...", "..."]}, ...]}${langInstruction}`;
 
   const response = await openrouter.chat.completions.create({
     model: MODEL,
@@ -189,12 +198,14 @@ export async function generateRefinedDescription(
         profile.major ? `Field/Major: ${profile.major}` : null,
         profile.interests ? `Interests: ${profile.interests}` : null,
         profile.experience ? `Experience: ${profile.experience}` : null,
+        profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
       ]
         .filter(Boolean)
         .join("\n")
     : "No profile available.";
 
   const qaText = qa.map(({ question, answer }) => `Q: ${question}\nA: ${answer}`).join("\n\n");
+  const langInstruction = getLangInstruction(profile);
 
   const prompt = `You are rewriting a project description to incorporate the learner's specific goals and context.
 
@@ -214,7 +225,7 @@ Rewrite the project description as a single cohesive paragraph (4–7 sentences)
 - Sound like the learner wrote it themselves — not like a Q&A summary
 - No bullet points, no section headers — a single flowing paragraph
 
-Return ONLY the rewritten description, no quotes, no preamble.`;
+Return ONLY the rewritten description, no quotes, no preamble.${langInstruction}`;
 
   const response = await openrouter.chat.completions.create({
     model: MODEL,
@@ -241,10 +252,13 @@ export async function generateNodeMap(
         profile.major ? `Field/Major: ${profile.major}` : null,
         profile.interests ? `Interests: ${profile.interests}` : null,
         profile.experience ? `Experience: ${profile.experience}` : null,
+        profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
       ]
         .filter(Boolean)
         .join("\n")
     : "No profile available — generate a general learning path.";
+
+  const langInstruction = getLangInstruction(profile);
 
   const systemPrompt = `You are an expert curriculum designer for self-directed learners. Your job is to generate a structured, personalized learning node map (a directed acyclic graph of learning steps) for a given project idea.
 
@@ -272,7 +286,7 @@ Rules for the node map:
 - If a description corrects a prior map ordering (for example "Docker validation is not the first step"), honor that correction in node prerequisites and node ordering.
 
 ${projectTypeRules}
-
+${langInstruction}
 Respond ONLY with valid JSON matching this exact schema, no markdown:
 {
   "nodes": [

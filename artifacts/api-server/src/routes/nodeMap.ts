@@ -470,13 +470,14 @@ router.patch("/projects/:projectId/nodes/:nodeId", requireAuth, async (req, res)
     return;
   }
 
+  const [profileForSummary] = await db.select().from(learnerProfilesTable).where(eq(learnerProfilesTable.clerkUserId, userId));
   let summary = parsed.data.summary ?? null;
 
   if (parsed.data.status === "completed" && !summary) {
     try {
       const session = await getOrCreateChatSession(node.id);
       const history = (Array.isArray(session.messages) ? session.messages : []) as ChatMessage[];
-      summary = await generateNodeSummary(node, project, history);
+      summary = await generateNodeSummary(node, project, history, profileForSummary ?? null);
 
       // Authoritative code extraction — runs on full chat history at completion time
       extractAndSaveFromMessages(params.data.projectId, node.title, project, history)
