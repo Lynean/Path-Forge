@@ -22,6 +22,7 @@ import {
 } from "@workspace/api-zod";
 import { requireAuth, getAuthUserId } from "../lib/auth";
 import { generateNodeMap } from "../lib/aiNodeMap";
+import { streamVisualization } from "../lib/aiVisualize";
 import {
   streamNodeChatMessage,
   streamOpeningMessage,
@@ -697,6 +698,24 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
           isExtra: true,
         }).returning();
         await db.insert(nodeEdgesTable).values({ fromNodeId: node.id, toNodeId: newNode.id });
+
+        // Seed the extra node's chat with the explanation as its opening message
+        await db.insert(chatSessionsTable).values({
+          nodeId: newNode.id,
+          messages: [{ role: "assistant", content: fullContent, createdAt: new Date().toISOString() }] as any,
+        });
+
+        // Replace main node's last assistant message with a redirect notification
+        const redirectContent = `[EXTRA_REDIRECT:${JSON.stringify({ nodeId: newNode.id, title: spawned.title })}]`;
+        const redirectMessages: ChatMessage[] = [
+          ...history,
+          { role: "user" as const, content: body.data.content, createdAt: new Date().toISOString() },
+          { role: "assistant" as const, content: redirectContent, createdAt: new Date().toISOString() },
+        ];
+        await db.update(chatSessionsTable)
+          .set({ messages: redirectMessages as any, updatedAt: new Date().toISOString() })
+          .where(eq(chatSessionsTable.nodeId, node.id));
+
         res.write(`data: ${JSON.stringify({ type: "extra_node_spawned", nodeId: newNode.id, title: spawned.title })}\n\n`);
       }
     } catch {
@@ -861,6 +880,49 @@ router.post("/projects/:projectId/revise-plan", requireAuth, async (req, res): P
     : [];
 
   res.json(RevisePlanResponse.parse({ projectId: params.data.projectId, nodes: updatedNodes, edges: updatedEdges }));
+});
+
+router.post("/projects/:projectId/nodes/:nodeId/visualize", requireAuth, async (req, res): Promise<void> => {
+  const userId = getAuthUserId(req);
+  const projectId = parseInt(String(req.params.projectId ?? "0"), 10);
+  const nodeId = parseInt(String(req.params.nodeId ?? "0"), 10);
+  if (!projectId || !nodeId) { res.status(400).json({ error: "Invalid params" }); return; }
+
+  const topic = typeof req.body?.topic === "string" ? req.body.topic.trim() : "";
+  if (!topic) { res.status(400).json({ error: "topic is required" }); return; }
+
+  const [project] = await db.select().from(projectsTable)
+    .where(and(eq(projectsTable.id, projectId), eq(projectsTable.clerkUserId, userId)));
+  if (!project) { res.status(404).json({ error: "Project not found" }); return; }
+
+  const [map] = await db.select().from(nodeMapsTable).where(eq(nodeMapsTable.projectId, projectId));
+  if (!map) { res.status(404).json({ error: "Node map not found" }); return; }
+
+  const [node] = await db.select().from(nodesTable)
+    .where(and(eq(nodesTable.id, nodeId), eq(nodesTable.mapId, map.id)));
+  if (!node) { res.status(404).json({ error: "Node not found" }); return; }
+
+  const [profile] = await db.select().from(learnerProfilesTable).where(eq(learnerProfilesTable.clerkUserId, userId));
+
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders();
+
+  const heartbeat = setInterval(() => res.write(": ping\n\n"), 15000);
+
+  try {
+    for await (const chunk of streamVisualization(topic, node.title, profile ?? null)) {
+      res.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);
+    }
+    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
+  } catch (err: any) {
+    res.write(`data: ${JSON.stringify({ type: "error", error: err?.message ?? "Stream error" })}\n\n`);
+  } finally {
+    clearInterval(heartbeat);
+    res.end();
+  }
 });
 
 router.get("/projects/:projectId/map", requireAuth, async (req, res): Promise<void> => {

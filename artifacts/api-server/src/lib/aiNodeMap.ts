@@ -3,6 +3,98 @@ import type { LearnerProfile } from "@workspace/db";
 
 const MODEL = "google/gemini-3.1-flash-lite";
 
+type ProjectType =
+  | "algorithm"
+  | "math-impl"
+  | "hardware"
+  | "robotics"
+  | "workflow-tools"
+  | "cybersecurity"
+  | "data-analytics"
+  | "enterprise-integration"
+  | "document-heavy"
+  | "theory";
+
+function detectProjectTypes(text: string): ProjectType[] {
+  const t = text.toLowerCase();
+  const found: ProjectType[] = [];
+  if (/\b(leetcode|codeforces|hackerrank|competitive programming|algorithm challenge|olympiad)\b/.test(t)) found.push("algorithm");
+  if (/\b(deep learning|machine learning|neural network|gradient|backprop|pytorch|tensorflow|keras|training loop|loss curve|epoch|llm|transformer|fine.tun)\b/.test(t)) found.push("math-impl");
+  if (/\b(arduino|raspberry pi|esp32|esp8266|\biot\b|embedded|microcontroller|servo|stepper motor|sensor|i2c|spi\b|uart|gpio|pwm|datasheet)\b/.test(t)) found.push("hardware");
+  if (/\b(ros2?|webots|gazebo|simulink|urdf|lidar|slam|odometry|ros node|ros topic|robotic)\b/.test(t)) found.push("robotics");
+  if (/\b(n8n|zapier|airtable|excel|google sheets|\bsas\b|power bi|figma|tableau|workflow builder|spreadsheet|pivot table|make\.com)\b/.test(t)) found.push("workflow-tools");
+  if (/\b(pentest|penetration test|ctf|capture the flag|nmap|burp|metasploit|vulnerability|exploit|hardening|oscp|owasp|security audit|cybersecurity|cyber security)\b/.test(t)) found.push("cybersecurity");
+  if (/\b(data anal|analytics|pandas|jupyter|ggplot|sql quer|statistics|data clean|data science|\.csv|data pipeline|bi dashboard)\b/.test(t)) found.push("data-analytics");
+  if (/\b(enterprise integrat|corporate ai|ibm.*agent|multi.agent system|api integrat|low.code|no.code|power automate)\b/.test(t)) found.push("enterprise-integration");
+  if (/\b(datasheet|reference manual|\brfc\b|whitepaper|technical manual)\b/.test(t)) found.push("document-heavy");
+  if (/\b(proof\b|theorem|calculus|linear algebra|probability theory|discrete math|number theory|abstract algebra)\b/.test(t)) found.push("theory");
+  return found;
+}
+
+function buildMapProjectTypeRules(types: ProjectType[]): string {
+  if (types.length === 0) return "";
+  const has = (...t: ProjectType[]) => t.some((x) => types.includes(x));
+  const blocks: string[] = ["\nProject-type node requirements — apply the relevant rules:"];
+
+  if (types.includes("algorithm")) blocks.push(`ALGORITHM / COMPETITIVE PROGRAMMING (LeetCode, Codeforces, HackerRank, olympiad):
+- Include nodes for: problem decomposition, identifying the algorithm pattern, brute-force implementation, optimisation to target complexity, edge case analysis, and final submission-ready solution.
+- Complexity analysis (time + space) must be its own node or explicitly part of the optimisation node — not optional.`);
+
+  if (types.includes("math-impl")) blocks.push(`MATH + IMPLEMENTATION (deep learning, ML, numerical methods, signal processing):
+- Pair every math concept node with a corresponding implementation node — intuition before code, not instead of it.
+- Include nodes for the mathematical foundations (e.g. gradient descent derivation, matrix operations, probability basics) even if the learner is an experienced coder. The math IS the learning.
+- Include a node for running and interpreting the first training/evaluation result (loss curve, accuracy, confusion matrix).`);
+
+  if (types.includes("hardware")) blocks.push(`HARDWARE / EMBEDDED (Arduino, Raspberry Pi, IoT, embedded C/C++):
+- Include a dedicated node for reading the relevant datasheet sections (pin assignment, voltage/current limits, timing diagram, communication protocol registers) — this is a skill node, not background reading.
+- Pair every hardware component with a wiring/circuit node before any code node that drives it.
+- Include a serial-monitor / debug-output node to verify hardware behavior before building higher-level logic.
+- Final node must verify observed physical behavior, not just compile success.`);
+
+  if (types.includes("robotics")) blocks.push(`ROBOTICS / SIMULATION (ROS2, Webots, Gazebo, MATLAB/Simulink):
+- Include nodes for: ROS2 workspace and package setup, the computation graph design (which nodes publish/subscribe to which topics), individual node implementation, launch file, and simulation verification.
+- Include a node explicitly for understanding the gap between simulation results and real-hardware behavior if the project targets a physical robot.
+- TF transforms, URDF, or sensor integration each deserve their own node if the project uses them.`);
+
+  if (types.includes("workflow-tools")) blocks.push(`VISUAL / WORKFLOW TOOLS (n8n, Excel, SAS, Power BI, Zapier, IBM multi-agent):
+- Include nodes for: tool setup and first workflow/workbook, core logic implementation, error handling and failure paths, testing with realistic data, and exporting/versioning the config.
+- Do NOT skip the error-handling node — workflows that silently fail are a known real-world problem.
+- For multi-agent systems: include nodes for agent role definition, inter-agent communication design, and end-to-end orchestration test.`);
+
+  if (types.includes("cybersecurity")) blocks.push(`CYBERSECURITY (penetration testing, security analysis, hardening, CTF):
+- Structure nodes to follow methodology: reconnaissance → enumeration → vulnerability identification → (if authorized) exploitation → evidence documentation → remediation recommendation. Do not skip the documentation and remediation nodes.
+- Include a node for setting up the authorized test environment or lab — never assume the learner works on a live production system.
+- Include a node for interpreting tool output (nmap, Burp Suite, Metasploit, etc.) separately from learning the tool syntax.
+- Final node must produce a written finding with impact and remediation — not just a successful exploit.`);
+
+  if (types.includes("data-analytics")) blocks.push(`DATA ANALYTICS (Python/R/SQL analysis, Excel analytics, BI dashboards, statistical modeling):
+- First nodes must address data loading and quality assessment (missing values, types, outliers, data source understanding) before any analysis.
+- Include a node connecting each analysis step to the business question it answers.
+- Include a reproducibility node: script-based pipeline, documented assumptions, version-controlled notebook or parameterized query.
+- Final node must produce an interpretable result for a non-technical reader (chart, table, written summary).`);
+
+  if (types.includes("enterprise-integration")) blocks.push(`NO-CODE / ENTERPRISE INTEGRATION (n8n, Zapier, Make, corporate AI integration, low-code platforms):
+- Include nodes for: integration architecture design, individual connector/API setup, data mapping and transformation, error and retry handling, and end-to-end integration test.
+- Include a node for cost/rate-limit awareness if the integration involves paid APIs or AI model calls.
+- Final node must demonstrate the integration handling both a success case and a failure case.`);
+
+  if (has("document-heavy", "hardware")) blocks.push(`DOCUMENT-HEAVY WORK (datasheets, RFCs, whitepapers, manuals, academic papers):
+- Include dedicated nodes for document navigation skills (finding the right section, reading tables and diagrams) — not just "read the datasheet."
+- Pair each document-reading node with an application node where the learner uses what they extracted (e.g., wire a component using the pin table they just read).`);
+
+  if (types.includes("theory")) blocks.push(`PURE THEORY / MATH (foundational math, algorithms theory, system design):
+- Include nodes that build intuition before formalism — concrete examples before general proofs.
+- Pair every abstract concept node with an application node where the learner uses or re-derives it.`);
+
+  // Version control — always append for multi-file intermediate+ projects
+  const needsGit = !types.includes("algorithm") && !types.includes("theory") && !types.includes("workflow-tools");
+  if (needsGit) blocks.push(`VERSION CONTROL:
+- If the project has more than one file, spans multiple sessions, or involves iterative development, include a Git setup node early (after environment setup, before first implementation).
+- For collaborative or deployment-bound projects, include a branching strategy or CI/CD node later in the map.`);
+
+  return blocks.join("\n\n");
+}
+
 interface AINode {
   id: string;
   title: string;
@@ -139,6 +231,9 @@ export async function generateNodeMap(
   project: { title: string; ideaPrompt: string },
   profile: LearnerProfile | null
 ): Promise<AINodeMapResponse> {
+  const projectTypes = detectProjectTypes(`${project.title} ${project.ideaPrompt}`);
+  const projectTypeRules = buildMapProjectTypeRules(projectTypes);
+
   const profileContext = profile
     ? [
         profile.age ? `Age: ${profile.age}` : null,
@@ -162,7 +257,7 @@ Rules for the node map:
 - Starter nodes (no prerequisites): set status to "available". All others start "locked".
   - Prefer 1–3 parallel starter nodes when distinct skills can be acquired independently at the outset (e.g., setting up the environment AND learning a core data structure at the same time).
 - The final node(s) should integrate prior learning into a working, testable piece of the project.
-- Each node must have: a short title (max 8 words), a 1–2 sentence brief with a concrete outcome, and an array of prerequisite node IDs (can be empty).
+- Each node must have: a 1–2 word title, a 1–2 sentence brief with a concrete outcome, and an array of prerequisite node IDs (can be empty). Titles must be ultra-short noun phrases — drop filler words like "Fundamentals of", "Introduction to", "Working with". If multiple nodes share the same concept, append a roman numeral to distinguish them (e.g. "Snake Movement I", "Snake Movement II"). Never exceed 3 words even with a roman numeral.
 - The graph must be a DAG — no cycles.
 - CRITICAL — tailor to the learner's existing knowledge: read the profile carefully and SKIP topics they already know.
   - If they have years of Python/C experience: do NOT include nodes on basic syntax, variables, loops, functions, or I/O. Start from where their knowledge ends.
@@ -176,19 +271,21 @@ Rules for the node map:
 - For rebuild, migration, audit, or "recreate from existing project" requests, the first nodes should inspect source documentation/code and extract architecture/contracts before implementation or infrastructure validation.
 - If a description corrects a prior map ordering (for example "Docker validation is not the first step"), honor that correction in node prerequisites and node ordering.
 
+${projectTypeRules}
+
 Respond ONLY with valid JSON matching this exact schema, no markdown:
 {
   "nodes": [
     {
       "id": "n1",
-      "title": "Short Node Title",
+      "title": "Node Title",
       "brief": "1-2 sentence description of what the learner will learn in this step.",
       "is_extra": false,
       "prerequisite_ids": []
     },
     {
       "id": "n2",
-      "title": "Next Topic Title",
+      "title": "Next Topic",
       "brief": "Description of what is learned here.",
       "is_extra": false,
       "prerequisite_ids": ["n1"]

@@ -45,6 +45,7 @@ export default function ProjectDetail() {
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(routeNodeId);
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
+  const checklistPortalRef = useRef<HTMLDivElement>(null);
 
   const [showReviseModal, setShowReviseModal] = useState(false);
   const [reviseDescription, setReviseDescription] = useState("");
@@ -346,6 +347,7 @@ export default function ProjectDetail() {
 
       <div className="flex-1 min-h-0 flex overflow-hidden" data-testid="map-area">
         <div className={cn("relative overflow-hidden transition-all duration-300", selectedNode ? "flex-1 hidden md:block" : "flex-1")}>
+          <div ref={checklistPortalRef} className="absolute top-4 right-4 z-20 pointer-events-none" />
           {isGenerating ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/80 backdrop-blur-sm z-10">
               <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -421,6 +423,8 @@ export default function ProjectDetail() {
               node={selectedNode}
               onClose={handleClosePanel}
               onMapUpdate={handleMapUpdate}
+              checklistPortalTarget={checklistPortalRef}
+              onExtraNodeCreated={handleNodeClick}
             />
           </div>
         )}

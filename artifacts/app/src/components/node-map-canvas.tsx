@@ -34,14 +34,14 @@ function NodeCard({ data }: NodeCardProps) {
   const isClickable = isAvailable || isCompleted;
 
   return (
-    <TooltipProvider delayDuration={500}>
+    <TooltipProvider delayDuration={200}>
       <Tooltip>
         <TooltipTrigger asChild>
           <div
             onClick={isClickable ? onClick : undefined}
             data-testid={`node-card-${node.id}`}
             className={[
-              "relative w-52 rounded-xl border p-3 transition-all duration-150 select-none",
+              "relative w-36 rounded-xl border px-3 py-2 transition-all duration-150 select-none",
               isSelected
                 ? "bg-primary/15 border-primary shadow-xl shadow-primary/40 ring-1 ring-primary"
                 : isAvailable
@@ -68,18 +68,9 @@ function NodeCard({ data }: NodeCardProps) {
                 )}
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-mono font-semibold leading-tight truncate">
+                <p className="text-sm font-mono font-semibold leading-tight break-words">
                   {node.title}
                 </p>
-                {node.summary ? (
-                  <p className="text-xs text-primary/70 mt-1 line-clamp-1 leading-relaxed italic">
-                    {node.summary}
-                  </p>
-                ) : (
-                  <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
-                    {node.brief}
-                  </p>
-                )}
                 {node.isExtra && (
                   <div className="flex items-center gap-0.5 mt-1">
                     <Sparkles className="w-2.5 h-2.5 text-primary/60" />

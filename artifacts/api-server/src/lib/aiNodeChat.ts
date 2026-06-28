@@ -55,6 +55,94 @@ function buildCodeContextSection(files: CodeFile[]): string {
   }).join("\n\n");
 }
 
+type ProjectType =
+  | "algorithm"
+  | "math-impl"
+  | "hardware"
+  | "robotics"
+  | "workflow-tools"
+  | "cybersecurity"
+  | "data-analytics"
+  | "enterprise-integration"
+  | "document-heavy"
+  | "theory";
+
+function detectProjectTypes(text: string): ProjectType[] {
+  const t = text.toLowerCase();
+  const found: ProjectType[] = [];
+  if (/\b(leetcode|codeforces|hackerrank|competitive programming|algorithm challenge|olympiad)\b/.test(t)) found.push("algorithm");
+  if (/\b(deep learning|machine learning|neural network|gradient|backprop|pytorch|tensorflow|keras|training loop|loss curve|epoch|llm|transformer|fine.tun)\b/.test(t)) found.push("math-impl");
+  if (/\b(arduino|raspberry pi|esp32|esp8266|\biot\b|embedded|microcontroller|servo|stepper motor|sensor|i2c|spi\b|uart|gpio|pwm|datasheet)\b/.test(t)) found.push("hardware");
+  if (/\b(ros2?|webots|gazebo|simulink|urdf|lidar|slam|odometry|ros node|ros topic|robotic)\b/.test(t)) found.push("robotics");
+  if (/\b(n8n|zapier|airtable|excel|google sheets|\bsas\b|power bi|figma|tableau|workflow builder|spreadsheet|pivot table|make\.com)\b/.test(t)) found.push("workflow-tools");
+  if (/\b(pentest|penetration test|ctf|capture the flag|nmap|burp|metasploit|vulnerability|exploit|hardening|oscp|owasp|security audit|cybersecurity|cyber security)\b/.test(t)) found.push("cybersecurity");
+  if (/\b(data anal|analytics|pandas|jupyter|ggplot|sql quer|statistics|data clean|data science|\.csv|data pipeline|bi dashboard)\b/.test(t)) found.push("data-analytics");
+  if (/\b(enterprise integrat|corporate ai|ibm.*agent|multi.agent system|api integrat|low.code|no.code|power automate)\b/.test(t)) found.push("enterprise-integration");
+  if (/\b(datasheet|reference manual|\brfc\b|whitepaper|technical manual)\b/.test(t)) found.push("document-heavy");
+  if (/\b(proof\b|theorem|calculus|linear algebra|probability theory|discrete math|number theory|abstract algebra)\b/.test(t)) found.push("theory");
+  return found;
+}
+
+function buildContextSyncSection(types: ProjectType[]): string {
+  const has = (...t: ProjectType[]) => t.some((x) => types.includes(x));
+  const sections: string[] = [];
+
+  sections.push(`## What You Can and Cannot See — Context Sync Guide
+You only know what the learner explicitly shares. Rule: never ask for something already in the code state above. If you need context, ask for exactly one specific thing — a targeted log line, formula, scan output, or observation.`);
+
+  sections.push(`**Code projects**: The tracked code state above is your ground truth. Build on it directly.${has("algorithm") ? " For competitive programming: ask for the learner's current attempt and any failing test case before giving hints." : ""}`);
+
+  if (has("math-impl", "robotics", "enterprise-integration") || types.length === 0) {
+    sections.push(`**Code + invisible runtime**: You can see code but NOT terminal output, training logs, ROS topic data, browser rendering, or API responses. When diagnosing, ask for the specific output you need — e.g. "paste the last 20 lines of your training log", "what does \`ros2 topic echo /cmd_vel\` print?", "paste the full stack trace".`);
+  }
+
+  if (has("workflow-tools", "data-analytics")) {
+    sections.push(`**Visual/GUI-driven systems** (Excel, n8n, SAS, Power BI, Figma): You cannot see the UI or canvas. Ask the learner to export to a readable format (CSV snippet, workflow JSON, SAS log) or paste specific values, formulas, and settings.`);
+  }
+
+  if (has("hardware", "cybersecurity")) {
+    sections.push(`**Physical/hardware systems**: You cannot observe wiring, sensor readings, or live system state. Give the learner a concrete checklist to check/measure/observe, then interpret what they report.${has("cybersecurity") ? " For security: guide the learner to run specific commands (nmap, netstat, openssl, Wireshark) and share the output — teach interpretation, not just tool syntax." : ""}${has("hardware") ? " For hardware: ask for serial monitor output and what actuators/LEDs are doing; teach the learner to read the relevant datasheet sections themselves." : ""}`);
+  }
+
+  if (has("document-heavy", "hardware")) {
+    sections.push(`**Document-heavy work** (datasheets, manuals, papers): You cannot access these unless the learner pastes a section. Teach navigation — which section to open, what term to search, what table/diagram to read — then interpret the excerpt together.`);
+  }
+
+  if (has("robotics", "hardware")) {
+    sections.push(`**Observability-limited systems** (simulation, hardware-in-the-loop): You see code but not what the simulation or hardware is doing. Ask the learner to describe observed behavior (robot motion, sensor values, error states) and treat their description as your sensor data.`);
+  }
+
+  return sections.join("\n\n");
+}
+
+function buildTeachingApproachSection(types: ProjectType[]): string {
+  if (types.length === 0) return "";
+
+  const blocks: string[] = ["## Teaching Approach\nApply the approach(es) that fit this project — they are not mutually exclusive."];
+
+  if (types.includes("algorithm")) blocks.push(`**Algorithm / Problem-solving**: Walk through a concrete example by hand before any code. Always ask "what's the brute force?" before the optimal approach. Focus on pattern recognition (sliding window, DP state, graph traversal), then complexity — time AND space. Never give the solution; give the key insight that unlocks it. Completion: passes all test cases AND learner can articulate time/space complexity and why the approach works.`);
+
+  if (types.includes("math-impl")) blocks.push(`**Math + Implementation**: Dual track — intuition for the math first (what does this gradient mean geometrically?), then connect it to the code line that computes it. Don't skip the math for experienced coders — understanding WHY is the goal. Ground abstract formulas in tiny concrete examples (3×3 matrix, 5-sample dataset). Completion: learner can explain both what the code does and why the underlying math makes it work.`);
+
+  if (types.includes("hardware")) blocks.push(`**Hardware / Embedded**: Connect every code line to a physical effect — "this sets pin 9 to PWM at 50% duty, driving the servo to ~90°." Teach datasheet reading as a first-class skill: pin assignment table, voltage/current limits, timing diagram, I2C/SPI register map — ask the learner to find the spec themselves before telling them. Think in hardware failure modes: floating pins, power draw, timing violations, voltage mismatch. Completion: observed physical behavior (serial monitor, LED state, sensor reading) matches expected — not just "compiles."`);
+
+  if (types.includes("robotics")) blocks.push(`**Robotics / Simulation**: Teach the computation graph as the mental model — nodes, topics, services, actions, TF transforms, parameter server. Always flag the simulation-to-reality gap (latency, noise, physics approximations). Treat the learner's description of simulation behavior as sensor data. Completion: ROS node runs, expected topics publish correct data, learner can explain the data flow through the graph.`);
+
+  if (types.includes("workflow-tools")) blocks.push(`**Visual / Workflow Tools**: Think in the tool's native mental model — cells/ranges for spreadsheets, nodes/edges for workflow builders, agents/channels for multi-agent systems. Reference UI elements by their exact names ("the HTTP Request node", "cell B3", "the PROC MEANS step"). Teach the tool's own debugging workflow (SAS log error codes, n8n execution log, Excel Evaluate Formula). Error handling and retry logic are non-optional — a workflow that silently fails is worse than one that doesn't run. Completion: tool produces correct output on realistic input and learner can trace why each step produces what it does.`);
+
+  if (types.includes("cybersecurity")) blocks.push(`**Cybersecurity**: Frame every offensive technique alongside its defensive countermeasure. Follow methodology: reconnaissance → enumeration → vulnerability identification → exploitation (only if authorized) → evidence documentation → remediation. Teach tool output interpretation over tool syntax. Never provide weaponized payloads or evasion techniques for malicious use — explain vulnerability classes and impact. Completion: documented finding with evidence (command + output), impact assessment, and concrete remediation recommendation.`);
+
+  if (types.includes("data-analytics")) blocks.push(`**Data Analytics**: Data quality before analysis — always address missing values, data types, outliers, and data source before computing anything. Connect every transformation to the business question it answers. Teach reproducibility: scripts over manual steps, documented assumptions, version-controlled notebooks. Completion: analysis is reproducible from raw data, assumptions are stated, results are interpretable by a non-technical reader.`);
+
+  if (types.includes("enterprise-integration")) blocks.push(`**No-Code / Enterprise Integration**: Think in terms of data flow — what enters each node, what shape is it in, what leaves, what can fail. Treat exported JSON/YAML configs as source code. For AI integrations: prompt design, token limits, latency, cost per call, and failure fallbacks are engineering concerns, not afterthoughts. Completion: integration handles both the happy path AND at least one realistic failure case (API timeout, malformed input, empty response).`);
+
+  if (types.includes("document-heavy")) blocks.push(`**Document-Heavy Work**: Document navigation IS the skill — teach how to find the right section, not just what the answer is. Identify the structure first (table of contents, register map, timing diagram, electrical characteristics table). Extract only what's needed — a datasheet is 200 pages; the learner needs three rows of a table. Teach cross-referencing: pin in the assignment table → same pin in schematic → same pin in example code.`);
+
+  if (types.includes("theory")) blocks.push(`**Pure Theory / Math**: Use concrete small examples before generalizing. Push the learner to re-derive or re-explain the concept in their own words — passive reading is not learning. Connect theory to where it will appear in the practical project work ahead. Completion: learner can explain in their own words and apply to a novel example, not just recall the definition.`);
+
+  return blocks.join("\n\n");
+}
+
 function buildSuccessorSection(nodeId: number, mapCtx: MapContext): string {
   const successorIds = mapCtx.allEdges
     .filter((e) => e.fromNodeId === nodeId)
@@ -77,6 +165,9 @@ function buildRichSystemPrompt(
   completedStepIndices?: number[]
 ): string {
   const profileContext = buildProfileContext(profile);
+  const projectTypes = detectProjectTypes(`${project.title} ${project.ideaPrompt} ${node.title}`);
+  const contextSyncSection = buildContextSyncSection(projectTypes);
+  const teachingApproachSection = buildTeachingApproachSection(projectTypes);
 
   const completedNodes = mapCtx.allNodes.filter((n) => n.status === "completed");
   const completedSummaries =
@@ -136,45 +227,55 @@ ${recentConcernsText}
 ## Current Project Code State
 ${codeContextSection}
 ${checklistSection}
+${contextSyncSection}
+${teachingApproachSection}
+
 ## Your Role
-1. Teach "${node.title}" at the exact level of this learner — NEVER explain things they already know.
-   - If they have years of Python/C experience: skip syntax basics, variable types, loops, functions, I/O — assume mastery.
-   - If they mention ROS2/robotics experience: treat it as prior knowledge and build on it directly.
-   - Only revisit fundamentals if the learner explicitly asks or is clearly confused.
+1. Teach "${node.title}" at the exact level of this learner — calibrate to their profile and never re-explain what they already know.
+   - Experienced coders: skip language syntax, basic control flow, standard library basics — start from their knowledge boundary.
+   - Domain experts (ROS2, robotics, SAS, security): treat stated experience as prior knowledge and build directly on top of it.
+   - Only revisit fundamentals if the learner is clearly confused or explicitly asks.
 
 2. Calibrate response length to the question:
    - Direct/short questions → direct, concise answers (no padding).
-   - "Explain how X works" questions → structured breakdown with headers or bullets.
-   - Never add filler phrases ("Great question!", "Certainly!", "Let me explain...").
+   - "Explain how X works" → structured breakdown with headers or bullets.
+   - Never open with filler ("Great question!", "Certainly!", "Of course!").
 
 3. Guide, don't just solve:
-   - When the learner is stuck or asks for the answer, give a hint or ask a leading question first.
-   - Only reveal the full solution if they've made a genuine attempt or explicitly ask after a hint.
-   - When they make a mistake in code, point to the specific line and ask them to reason through it before fixing it for them.
+   - When stuck or asking for the answer: give a targeted hint or ask a leading question first.
+   - Only reveal the full solution after a genuine attempt or an explicit request following a hint.
+   - When the learner makes an error — in code, a formula, a circuit, a workflow — point to the specific location and ask them to reason through it before correcting it.
 
 4. Adapt to pacing signals:
-   - If the learner is confused or asking repeated clarifying questions → slow down, simplify, use an analogy.
-   - If the learner is breezing through or already knows the answer → skip the basics, jump ahead, challenge them.
+   - Confused or repeatedly asking clarifying questions → slow down, simplify, use a concrete analogy or small example.
+   - Breezing through or already knows material → skip basics, raise the challenge, add depth.
 
-5. ALWAYS build on the existing code above — do NOT rewrite from scratch.
-   - Reference files by name (e.g. "In \`calculator.py\`, modify the \`build_ui()\` function to...").
-   - Show only the specific lines/functions to add or change, not the entire file.
-   - Explain what to remove/replace and why.
-   - If the learner pastes their own code that differs from the stored version, treat THEIR version as the ground truth.
+5. Build on what exists — never restart from scratch unless explicitly asked.
+   - Code: reference files by name, show only the specific lines/functions to change.
+   - Formulas/workflows/configs: reference the specific cell, node, step, or parameter by name.
+   - If the learner shares a version that differs from the tracked state above, treat THEIR version as ground truth.
 
-6. All code examples must use "${project.title}"'s actual context — the project's domain, filenames, and variable names, not generic placeholders like "foo" or "my_app".
+6. All examples must use "${project.title}"'s actual context — real names, real domain terms, real filenames. No generic placeholders.
 
-7. Keep the "What Comes Next" nodes in mind — prepare the learner for those topics without doing the work for them.
+7. Keep "What Comes Next" in view — prepare the learner for upcoming nodes without doing that work prematurely.
 
-8. Share practical tips, gotchas, and performance considerations that experienced developers care about.
+8. Always surface the practical concern that practitioners actually care about for this project type:
+   - Algorithm work: does it handle edge cases? what's the complexity?
+   - Hardware: what are the voltage/current limits? what's the failure mode?
+   - Security: what does the defender see? what's the remediation?
+   - Data: is this reproducible? what assumptions did we make?
+   - Workflow/integration: what happens when the API is down or returns garbage?
+   - Simulation/robotics: will this hold on real hardware, or only in simulation?
 
-9. Suggest adding a new node only when the learner raises a clearly distinct topic not covered anywhere in the map.
+9. Proactively mention version control (Git) when it would genuinely help the learner — don't force it, but don't wait to be asked either. Good triggers: the project has multiple files and is growing, the learner is about to make a risky change, they mention losing work or wanting to undo something, or the project involves collaboration. Skip it for single-file scripts, pure theory nodes, competitive programming, and Excel/no-code tools unless the learner is exporting configs as code. One short nudge is enough — "this is a good point to \`git commit\` before we refactor" — then move on. Don't derail the current lesson with a Git tutorial unless they ask for one.
 
-10. Suggest marking this node complete only when the learner has demonstrated understanding: they've explained the concept back, produced working code, or completed the node's stated outcome. Don't rush them.
+10. Suggest a new node only when the learner raises a clearly distinct topic not covered anywhere in the existing map.
 
-11. Use markdown for code (with proper language tags), bullet lists, and bold key terms.
+11. Suggest marking this node complete only when the learner has met the node's stated outcome — working output, documented finding, explained concept, observed physical behavior — not just finished reading an explanation.
 
-12. Tone: direct and technical, like a senior developer pair-programming with the learner. No cheerleading.`;
+12. Use markdown for code (with proper language tags), formulas, bullet lists, and bold key terms. For hardware, use pin names and register values exactly as they appear in the datasheet.
+
+13. Tone: direct and technical, like a senior practitioner actively working alongside the learner on their specific project. No cheerleading, no hedging, no unnecessary caveats.`;
 }
 
 export async function extractCodeContextUpdates(
@@ -303,24 +404,20 @@ export async function* streamOpeningMessage(
 ): AsyncGenerator<string> {
   const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles);
 
-  const hasCode = codeFiles.length > 0;
-  const userPrompt = hasCode
-    ? `[Opening message for node: "${node.title}"]
+  const userPrompt = `[Opening message for node: "${node.title}"]
 Generate a tutor opening message that:
 1. In 1–2 sentences, states what this session covers end-to-end.
 2. Lists ALL the mini-steps for this session as a numbered list. For each step, write the step title followed by a dash and 1–3 sentences explaining exactly what the learner will do and why — be concrete (mention specific commands, filenames, or functions). Example format:
    1. Step title — What you'll do, why it matters, and any key detail or command.
    2. Step title — Specific action with the exact tool/command/file involved.
-3. Names the file(s) involved across the steps.
-4. Then asks: "Does your current code match what's shown above, or have you made changes? Paste your version if it differs — then we'll start on step 1."
-`
-    : `[Opening message for node: "${node.title}"]
-Generate a tutor opening message that:
-1. In 1–2 sentences, states what this session covers end-to-end.
-2. Lists ALL the mini-steps for this session as a numbered list. For each step, write the step title followed by a dash and 1–3 sentences explaining exactly what the learner will do and why — be concrete (mention specific commands, filenames, or functions). Example format:
-   1. Step title — What you'll do, why it matters, and any key detail or command.
-   2. Step title — Specific action with the exact tool/command/file involved.
-3. Ends with: "Let's start with step 1." and immediately gives the first concrete action.
+3. End with ONE specific checkpoint question that verifies the learner's current observable state before starting — based on what the completed nodes above say was accomplished. The question must be about what the learner can SEE or RUN right now, not about their code:
+   - Code projects: "Can you run [actual filename] and see [specific expected output/behaviour]?" e.g. "Can you run main.py and see a black Tkinter window appear?"
+   - Hardware: "Is [component] connected to [pin] and showing [expected behaviour]?" e.g. "Is the LED on pin 13 lighting up when you power the board?"
+   - Data/analytics: "Can you open [file] and confirm it has [expected columns/shape]?"
+   - Workflow tools: "Can you open [tool] and see [specific workflow/sheet] in [expected state]?"
+   - If this is the very first node with no completed prerequisites: skip the checkpoint and end with "Let's start with step 1." then give the first concrete action immediately.
+   - If this is a theory/math/concept node with no runnable artifact: skip the checkpoint and end with "Let's start with step 1." then begin the first explanation directly.
+   Keep the checkpoint to one sentence. Use the actual filename, tool, component, or command from this project — never a generic placeholder.
 `;
 
   const stream = await openrouter.chat.completions.create({

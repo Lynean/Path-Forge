@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import {
   useGetNodeChat,
   useUpdateNodeStatus,
@@ -24,7 +25,9 @@ import {
   Check,
   ChevronDown,
   ArrowRight,
+  Eye,
 } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import ReactMarkdown from "react-markdown";
@@ -109,12 +112,14 @@ function SessionChecklist({
   onToggle,
   onNextStep,
   isStreaming,
+  floating,
 }: {
   steps: string[];
   checked: Set<number>;
   onToggle: (index: number) => void;
   onNextStep?: () => void;
   isStreaming?: boolean;
+  floating?: boolean;
 }) {
   const [expanded, setExpanded] = useState(true);
   if (steps.length < 2) return null;
@@ -124,7 +129,10 @@ function SessionChecklist({
   const hasDescriptions = parsedSteps.some((s) => s.description.length > 0);
 
   return (
-    <div className="border-b border-border shrink-0">
+    <div className={floating
+      ? "bg-card/90 backdrop-blur-sm border border-border rounded-xl shadow-lg overflow-hidden min-w-48 max-w-64"
+      : "border-b border-border shrink-0"
+    }>
       <button
         onClick={() => setExpanded((v) => !v)}
         className="w-full flex items-center justify-between px-4 py-2 hover:bg-muted/30 transition-colors"
@@ -217,6 +225,43 @@ function SessionChecklist({
   );
 }
 
+function parseExtraRedirect(content: string): { nodeId: number; title: string } | null {
+  if (!content.startsWith("[EXTRA_REDIRECT:")) return null;
+  try {
+    return JSON.parse(content.slice("[EXTRA_REDIRECT:".length, -1));
+  } catch {
+    return null;
+  }
+}
+
+function ExtraRedirectNotice({
+  nodeId,
+  title,
+  onNavigate,
+}: {
+  nodeId: number;
+  title: string;
+  onNavigate?: (nodeId: number) => void;
+}) {
+  return (
+    <div className="flex justify-start">
+      <div className="flex items-center gap-2 px-3.5 py-2.5 bg-primary/10 border border-primary/20 rounded-2xl rounded-bl-sm max-w-[86%]">
+        <ArrowRight className="w-3.5 h-3.5 text-primary shrink-0" />
+        <span className="text-xs text-muted-foreground">
+          Topic moved to{" "}
+          <button
+            onClick={() => onNavigate?.(nodeId)}
+            className="font-mono font-semibold text-primary hover:underline cursor-pointer"
+          >
+            {title}
+          </button>
+          {" "}for deeper exploration.
+        </span>
+      </div>
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   return (
@@ -266,9 +311,11 @@ interface NodeChatPanelProps {
   node: ApiNode;
   onClose: () => void;
   onMapUpdate: () => void;
+  checklistPortalTarget?: RefObject<HTMLDivElement | null>;
+  onExtraNodeCreated?: (nodeId: number) => void;
 }
 
-export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeChatPanelProps) {
+export function NodeChatPanel({ projectId, node, onClose, onMapUpdate, checklistPortalTarget, onExtraNodeCreated }: NodeChatPanelProps) {
   const nodeId = node.id;
   const queryClient = useQueryClient();
 
@@ -281,6 +328,11 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
   const [spawnTopic, setSpawnTopic] = useState("");
   const [showSpawnInput, setShowSpawnInput] = useState(false);
   const [isSpawning, setIsSpawning] = useState(false);
+  const [showVisualizeInput, setShowVisualizeInput] = useState(false);
+  const [visualizeTopic, setVisualizeTopic] = useState("");
+  const [isVisualizing, setIsVisualizing] = useState(false);
+  const [visualizationHtml, setVisualizationHtml] = useState<string | null>(null);
+  const [showVisualizationPanel, setShowVisualizationPanel] = useState(false);
   const [completedSummary, setCompletedSummary] = useState<string | null>(null);
   const [ministeps, setMinisteps] = useState<string[]>([]);
   // AI-confirmed done (from [STEP_DONE:N] markers in history / SSE events)
@@ -297,6 +349,7 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const openingAbortRef = useRef<AbortController | null>(null);
+  const spawnedExtraNodeRef = useRef<{ nodeId: number; title: string } | null>(null);
 
   const { data: chatHistory, isLoading: chatLoading } = useGetNodeChat(projectId, nodeId, {
     query: {
@@ -481,6 +534,60 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
     }
   };
 
+  const handleVisualize = async () => {
+    const topic = visualizeTopic.trim();
+    if (!topic || isVisualizing) return;
+    setIsVisualizing(true);
+    setVisualizationHtml("");
+    setShowVisualizationPanel(true);
+    setShowVisualizeInput(false);
+    let accumulated = "";
+    try {
+      const res = await fetch(
+        `${base}/api/projects/${projectId}/nodes/${nodeId}/visualize`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ topic }),
+        }
+      );
+      if (!res.ok || !res.body) {
+        const text = await res.text().catch(() => "");
+        throw new Error(`HTTP ${res.status}: ${text || "no body"}`);
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+        for (const line of lines) {
+          if (line.startsWith("data: ")) {
+            try {
+              const parsed = JSON.parse(line.slice(6).trim());
+              if (parsed.type === "chunk" && parsed.content) {
+                accumulated += parsed.content;
+              }
+            } catch {}
+          }
+        }
+      }
+      // Strip markdown fences the model may emit despite the prompt
+      const clean = accumulated
+        .replace(/^```(?:html)?\s*\n?/i, "")
+        .replace(/\n?```\s*$/, "")
+        .trim();
+      setVisualizationHtml(clean);
+    } catch (err: any) {
+      setVisualizationHtml(`<html><body style="font-family:monospace;color:#e74c3c;padding:16px">Error: ${err?.message ?? "Unknown error"}</body></html>`);
+    } finally {
+      setIsVisualizing(false);
+    }
+  };
+
   const isCompleted = node.status === "completed";
   const isLocked = node.status === "locked";
 
@@ -550,6 +657,7 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
               } else if (parsed.type === "done") {
                 // message complete
               } else if (parsed.type === "extra_node_spawned") {
+                spawnedExtraNodeRef.current = { nodeId: parsed.nodeId as number, title: parsed.title as string };
                 queryClient.invalidateQueries({ queryKey: getGetNodeMapQueryKey(projectId) });
                 queryClient.invalidateQueries({ queryKey: getGetProjectStatsQueryKey(projectId) });
                 onMapUpdate();
@@ -564,14 +672,20 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
         }
       }
 
-      const assistantMsg: ChatMessage = {
-        role: "assistant",
-        content: fullContent,
-        createdAt: new Date().toISOString(),
-      };
-      setLocalMessages((prev) => [...prev, assistantMsg]);
-      setStreamingContent("");
-      queryClient.invalidateQueries({ queryKey: getGetNodeChatQueryKey(projectId, nodeId) });
+      const spawnInfo = spawnedExtraNodeRef.current;
+      spawnedExtraNodeRef.current = null;
+
+      if (spawnInfo) {
+        const redirectContent = `[EXTRA_REDIRECT:${JSON.stringify({ nodeId: spawnInfo.nodeId, title: spawnInfo.title })}]`;
+        setLocalMessages((prev) => [...prev, { role: "assistant" as const, content: redirectContent, createdAt: new Date().toISOString() }]);
+        setStreamingContent("");
+        queryClient.invalidateQueries({ queryKey: getGetNodeChatQueryKey(projectId, nodeId) });
+        onExtraNodeCreated?.(spawnInfo.nodeId);
+      } else {
+        setLocalMessages((prev) => [...prev, { role: "assistant" as const, content: fullContent, createdAt: new Date().toISOString() }]);
+        setStreamingContent("");
+        queryClient.invalidateQueries({ queryKey: getGetNodeChatQueryKey(projectId, nodeId) });
+      }
     } catch (err: any) {
       if (err?.name !== "AbortError") {
         setLocalMessages((prev) => [
@@ -626,11 +740,22 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
           </div>
 
           <div className="flex items-center gap-1.5 shrink-0">
+            {!isLocked && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setShowVisualizeInput((v) => !v); setShowSpawnInput(false); }}
+                className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
+                title="Visualize a concept"
+              >
+                <Eye className="w-3.5 h-3.5" />
+              </Button>
+            )}
             {!isCompleted && !isLocked && (
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => setShowSpawnInput((v) => !v)}
+                onClick={() => { setShowSpawnInput((v) => !v); setShowVisualizeInput(false); }}
                 className="h-7 w-7 p-0 text-muted-foreground hover:text-foreground"
                 title="Add extra learning node"
               >
@@ -704,6 +829,35 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
           </div>
         )}
 
+        {showVisualizeInput && (
+          <div className="mt-2 flex gap-1.5">
+            <input
+              type="text"
+              value={visualizeTopic}
+              onChange={(e) => setVisualizeTopic(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleVisualize()}
+              placeholder="What do you want to visualize?"
+              autoFocus
+              className="flex-1 bg-input border border-border rounded-lg px-2.5 py-1.5 text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            <Button
+              size="sm"
+              onClick={handleVisualize}
+              disabled={isVisualizing || !visualizeTopic.trim()}
+              className="h-8 text-xs px-2 font-mono"
+            >
+              {isVisualizing ? (
+                <Loader2 className="w-3 h-3 animate-spin" />
+              ) : (
+                <>
+                  <Eye className="w-3 h-3 mr-1" />
+                  Go
+                </>
+              )}
+            </Button>
+          </div>
+        )}
+
         {isCompleted && (node.summary || completedSummary) && (
           <div className="mt-2 px-2.5 py-1.5 bg-primary/10 border border-primary/20 rounded-lg">
             <p className="text-xs text-primary/80 italic leading-relaxed">
@@ -713,13 +867,30 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
         )}
       </div>
 
-      <SessionChecklist
-        steps={ministeps}
-        checked={checkedSteps}
-        onToggle={handleToggleStep}
-        onNextStep={!isCompleted && !isLocked ? handleNextStep : undefined}
-        isStreaming={isStreaming}
-      />
+      {ministeps.length >= 2 && checklistPortalTarget?.current
+        ? createPortal(
+            <div className="pointer-events-auto w-56">
+              <SessionChecklist
+                floating
+                steps={ministeps}
+                checked={checkedSteps}
+                onToggle={handleToggleStep}
+                onNextStep={!isCompleted && !isLocked ? handleNextStep : undefined}
+                isStreaming={isStreaming}
+              />
+            </div>,
+            checklistPortalTarget.current
+          )
+        : ministeps.length >= 2
+        ? <SessionChecklist
+            steps={ministeps}
+            checked={checkedSteps}
+            onToggle={handleToggleStep}
+            onNextStep={!isCompleted && !isLocked ? handleNextStep : undefined}
+            isStreaming={isStreaming}
+          />
+        : null
+      }
 
       <div className="flex-1 min-h-0 overflow-y-auto px-3 py-3 space-y-3">
         {chatLoading && !localMessagesLoaded ? (
@@ -749,9 +920,15 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
           </div>
         ) : (
           <>
-            {localMessages.map((msg, i) => (
-              <MessageBubble key={i} message={msg} />
-            ))}
+            {localMessages.map((msg, i) => {
+              if (msg.role === "assistant") {
+                const redirect = parseExtraRedirect(msg.content);
+                if (redirect) {
+                  return <ExtraRedirectNotice key={i} nodeId={redirect.nodeId} title={redirect.title} onNavigate={onExtraNodeCreated} />;
+                }
+              }
+              return <MessageBubble key={i} message={msg} />;
+            })}
             {isStreaming && streamingContent && (
               <MessageBubble
                 message={{
@@ -795,6 +972,32 @@ export function NodeChatPanel({ projectId, node, onClose, onMapUpdate }: NodeCha
           </Button>
         </div>
       </div>
+
+      <Dialog open={showVisualizationPanel} onOpenChange={setShowVisualizationPanel}>
+        <DialogContent className="max-w-3xl w-full p-0 overflow-hidden">
+          <DialogHeader className="px-4 py-3 border-b border-border shrink-0">
+            <DialogTitle className="font-mono text-sm flex items-center gap-2">
+              <Eye className="w-4 h-4 text-primary" />
+              {visualizeTopic || "Visualization"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="relative w-full" style={{ height: "520px" }}>
+            {isVisualizing ? (
+              <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground font-mono">
+                <Loader2 className="w-6 h-6 animate-spin text-primary" />
+                <span className="text-xs">Generating visualization...</span>
+              </div>
+            ) : visualizationHtml ? (
+              <iframe
+                srcDoc={visualizationHtml}
+                sandbox="allow-scripts"
+                className="w-full h-full border-0"
+                title="Visualization"
+              />
+            ) : null}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
