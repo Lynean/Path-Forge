@@ -20,7 +20,7 @@ export async function* streamVisualization(
 ): AsyncIterable<string> {
   const learnerCtx = profile
     ? [
-        profile.experience ? `Experience: ${profile.experience}` : null,
+        profile.profileSummary ? profile.profileSummary : null,
         profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
         profile.major ? `Major: ${profile.major}` : null,
         profile.preferredLanguage ? `Preferred language for labels: ${profile.preferredLanguage}` : null,
@@ -47,8 +47,16 @@ export async function* streamVisualization(
     ],
   });
 
+  let finishReason: string | null = null;
   for await (const chunk of stream) {
     const content = chunk.choices[0]?.delta?.content;
     if (content) yield content;
+    const fr = chunk.choices[0]?.finish_reason;
+    if (fr) finishReason = fr;
+  }
+  // A truncated response (hit max_tokens mid-generation) would otherwise render as
+  // broken/blank HTML with no indication anything went wrong — treat it as a failure.
+  if (finishReason && finishReason !== "stop") {
+    throw new Error(`AI response was cut off (${finishReason}) before finishing — please try again.`);
   }
 }

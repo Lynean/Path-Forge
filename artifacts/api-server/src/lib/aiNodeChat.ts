@@ -5,6 +5,29 @@ const MODEL = "google/gemini-3.1-flash-lite";
 
 export type { CodeFile };
 
+/**
+ * Wraps a chat-completion stream and yields its content deltas, but throws if the
+ * stream ends for any reason other than a clean "stop" (e.g. "length" — hit max_tokens
+ * mid-generation). Without this, a truncated response — a dangling [STEP_UPDATE:N] with
+ * no closing tag, a cut-off command mid-line — would otherwise be treated as a normal,
+ * complete response: persisted to chat history and shown to the learner as-is. The
+ * caller's error handling (SSE error event, no DB write) takes over from the throw.
+ */
+async function* consumeCompletionStream(
+  stream: AsyncIterable<{ choices: Array<{ delta?: { content?: string | null }; finish_reason?: string | null }> }>
+): AsyncGenerator<string> {
+  let finishReason: string | null = null;
+  for await (const chunk of stream) {
+    const delta = chunk.choices[0]?.delta?.content;
+    if (delta) yield delta;
+    const fr = chunk.choices[0]?.finish_reason;
+    if (fr) finishReason = fr;
+  }
+  if (finishReason && finishReason !== "stop") {
+    throw new Error(`AI response was cut off (${finishReason}) before finishing — please try again.`);
+  }
+}
+
 export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
@@ -16,22 +39,88 @@ interface MapContext {
   allEdges: { fromNodeId: number; toNodeId: number }[];
 }
 
+// The opening message encodes the session plan as `[SLIDE:intro]...[SLIDE:1]...[SLIDE:2]...`.
 function extractMinistepsFromHistory(history: ChatMessage[]): string[] {
-  const opening = history.find((m) => m.role === "assistant");
+  const opening = history.find((m) => m.role === "assistant" && m.content.includes("[SLIDE:"));
   if (!opening) return [];
-  const lines = opening.content.split("\n");
+  const parts = opening.content.split(/\[SLIDE:(\w+)\]/);
   const steps: string[] = [];
-  let inBlock = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (/^\d+\.\s+\S/.test(trimmed)) {
-      steps.push(trimmed.replace(/^\d+\.\s+/, ""));
-      inBlock = true;
-    } else if (inBlock && trimmed !== "") {
-      break;
-    }
+  for (let i = 1; i < parts.length - 1; i += 2) {
+    const key = parts[i].trim();
+    if (key === "intro") continue;
+    const body = parts[i + 1].trim();
+    if (!body) continue;
+    const titleMatch = body.match(/^\*\*([^*]+)\*\*/);
+    steps.push(titleMatch ? titleMatch[1].trim() : body.split("\n")[0].slice(0, 60));
   }
   return steps.length >= 2 ? steps : [];
+}
+
+function isInternalHistoryMessage(m: ChatMessage): boolean {
+  return m.role === "assistant" && (/^\[STEP_DETAIL:\d+\]/.test(m.content) || m.content.startsWith("[EXTRA_REDIRECT:"));
+}
+
+/**
+ * The raw messages array persisted per node mixes real conversation turns with internal
+ * bookkeeping entries — cached step-detail walkthroughs (can run thousands of tokens
+ * each) and node-redirect notices. Neither is something the tutor actually "said" in
+ * conversation; sending them to the model as chat turns wastes context budget and
+ * confuses the model with formatting it never spoke aloud. The opening message itself
+ * (the `[SLIDE:...]` plan) is kept but replaced with a short pointer, since its content
+ * is already surfaced via the Session Checklist section built from it.
+ */
+function cleanChatHistory(history: ChatMessage[]): ChatMessage[] {
+  return history
+    .filter((m) => !isInternalHistoryMessage(m))
+    .map((m) =>
+      m.role === "assistant" && m.content.includes("[SLIDE:")
+        ? { ...m, content: "(Opening session plan for this node — see the Session Checklist above for the step list.)" }
+        : m
+    );
+}
+
+const HISTORY_WINDOW_SIZE = 16; // keep roughly the last 8 turns verbatim
+
+/**
+ * Chat sessions can run long, and the full history was previously resent on every turn —
+ * unbounded prompt growth that increases cost/latency and raises the risk of hitting the
+ * output token limit mid-generation. This keeps the most recent messages verbatim
+ * (recency matters most for a direct reply) and condenses anything older into one short
+ * AI-written summary instead of resending it in full every single turn.
+ */
+async function condenseHistoryForModel(
+  cleanedHistory: ChatMessage[]
+): Promise<{ recentHistory: ChatMessage[]; olderSummary: string | null }> {
+  if (cleanedHistory.length <= HISTORY_WINDOW_SIZE) {
+    return { recentHistory: cleanedHistory, olderSummary: null };
+  }
+
+  const older = cleanedHistory.slice(0, -HISTORY_WINDOW_SIZE);
+  const recentHistory = cleanedHistory.slice(-HISTORY_WINDOW_SIZE);
+
+  const transcript = older
+    .map((m) => `${m.role === "user" ? "Learner" : "Tutor"}: ${m.content.slice(0, 400)}`)
+    .join("\n\n");
+
+  const prompt = `Summarize the following earlier portion of a tutoring conversation in one short paragraph (5-8 sentences). Preserve concrete facts, corrections, and decisions established, and what was already covered — this summary replaces the raw messages as context for continuing the conversation, so don't lose anything a continuation would need.
+
+${transcript}
+
+Respond with ONLY the summary paragraph, no preamble.`;
+
+  try {
+    const response = await openrouter.chat.completions.create({
+      model: MODEL,
+      max_tokens: 400,
+      messages: [{ role: "user", content: prompt }],
+    });
+    const olderSummary = response.choices[0]?.message?.content?.trim() || null;
+    return { recentHistory, olderSummary };
+  } catch {
+    // Summarization failing shouldn't fail the whole chat turn — losing the oldest
+    // context is better than losing the reply entirely.
+    return { recentHistory, olderSummary: null };
+  }
 }
 
 function buildProfileContext(profile: LearnerProfile | null): string {
@@ -40,8 +129,7 @@ function buildProfileContext(profile: LearnerProfile | null): string {
     profile.age ? `Age: ${profile.age}` : null,
     profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
     profile.major ? `Field/Major: ${profile.major}` : null,
-    profile.interests ? `Interests: ${profile.interests}` : null,
-    profile.experience ? `Experience: ${profile.experience}` : null,
+    profile.profileSummary ? profile.profileSummary : null,
     profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
   ]
     .filter(Boolean)
@@ -169,7 +257,8 @@ function buildRichSystemPrompt(
   recentConcerns: string[],
   codeFiles: CodeFile[],
   history?: ChatMessage[],
-  completedStepIndices?: number[]
+  completedStepIndices?: number[],
+  olderHistorySummary?: string | null
 ): string {
   const profileContext = buildProfileContext(profile);
   const projectTypes = detectProjectTypes(`${project.title} ${project.ideaPrompt} ${node.title}`);
@@ -202,7 +291,11 @@ function buildRichSystemPrompt(
   const ministeps = history ? extractMinistepsFromHistory(history) : [];
   const done = new Set(completedStepIndices ?? []);
   const checklistSection = ministeps.length >= 2
-    ? `\n## Session Checklist\nMini-steps for this session (✓ = done, ○ = pending):\n${ministeps.map((s, i) => `${done.has(i) ? "✓" : "○"} ${i + 1}. ${s}`).join("\n")}\n\nTracking rule: when the learner has COMPLETED a pending step — they've implemented it, run it, and confirmed it works — append \`[STEP_DONE:N]\` at the very end of your response (N = 1-based step number). You may mark multiple: \`[STEP_DONE:1][STEP_DONE:2]\`. Never mark a step done just because you explained it. Steps already marked ✓ are done — do not re-mark them.\n`
+    ? `\n## Session Checklist\nMini-steps for this session (✓ = done, ○ = pending):\n${ministeps.map((s, i) => `${done.has(i) ? "✓" : "○"} ${i + 1}. ${s}`).join("\n")}\n\nTracking rule: when the learner has COMPLETED a pending step — they've implemented it, run it, and confirmed it works — call the mark_steps_done tool (see below). Never mark a step done just because you explained it. Steps already marked ✓ are done — do not re-mark them.\n`
+    : "";
+
+  const olderHistorySection = olderHistorySummary
+    ? `\n## Earlier in This Conversation (summarized — older messages, not shown verbatim below)\n${olderHistorySummary}\n`
     : "";
 
   return `You are a personalized AI tutor for the learning topic: "${node.title}".
@@ -234,6 +327,7 @@ ${recentConcernsText}
 ## Current Project Code State
 ${codeContextSection}
 ${checklistSection}
+${olderHistorySection}
 ${contextSyncSection}
 ${teachingApproachSection}
 
@@ -276,7 +370,19 @@ ${teachingApproachSection}
 
 9. Proactively mention version control (Git) when it would genuinely help the learner — don't force it, but don't wait to be asked either. Good triggers: the project has multiple files and is growing, the learner is about to make a risky change, they mention losing work or wanting to undo something, or the project involves collaboration. Skip it for single-file scripts, pure theory nodes, competitive programming, and Excel/no-code tools unless the learner is exporting configs as code. One short nudge is enough — "this is a good point to \`git commit\` before we refactor" — then move on. Don't derail the current lesson with a Git tutorial unless they ask for one.
 
-10. Suggest a new node only when the learner raises a clearly distinct topic not covered anywhere in the existing map.
+10. **Tools vs. your text reply — use both together, each for its own job:**
+
+Your text reply is always the conversational answer to the learner (or, if you're only taking action with nothing to answer, a short 1–2 sentence note on what you did and why). Never leave it empty. Call tools alongside it — in the same turn — whenever the situation genuinely calls for one:
+
+- **update_step** — the learner asks to change one or more steps, a step is clearly wrong, OR you realize something YOU said earlier (a command, a fact, an approach) was incorrect or misleading and it affects how a step should be done. This includes recommending a different tool, language, framework, library, dataset, board/hardware, or environment than what a step originally assumed — e.g. you determine partway through the conversation that the learner's hardware can't run a required library, or their chosen tool/plan doesn't support something the step depends on. That is a self-correction just as much as a wrong fact, and it is NOT satisfied by just mentioning the change in your text reply. You do NOT write the step's new title/description yourself — pass stepNumber and a clear, specific reason (what changed and why, including any concrete new facts — the specific tool/board/file/approach now in play), and a dedicated backend pass writes the new title/brief from that reason plus the step's current content and the other steps in the plan, so the rewrite stays consistent with the rest of the session instead of depending on whatever else was in this chat turn. A vague reason produces a vague step — be as specific as you would be if you were writing the step yourself. Call it once per step that needs to change — never resend a step that's still correct, and never call it for steps that don't need changing. When you flag step N, also check the steps AFTER it: later steps often build on the same fact, file, directory, tool, or approach you're correcting, even if the learner's message only called out step N by name — a directory rename, tool swap, or corrected assumption at step N frequently still applies at step N+1, N+2, etc. Call update_step for each later step that's now wrong too, in the same turn, rather than assuming "the learner only asked about step N so the rest must be fine." The intro/overview is NOT a step — never target it with a stepNumber. If the step change also makes the session overview wrong or outdated, include introUpdate (written directly by you, in full) in that same update_step call to fix both together. Treat needing an introUpdate as a signal to look harder, not narrower: if the overview itself is wrong, the correction is usually project-wide, not confined to whichever step you were just discussing — re-check every step in the plan, not only the ones the learner explicitly mentioned, and call update_step for each one that's now wrong. There is no standalone way to edit only the intro — it's only ever updated alongside a step change (via introUpdate) or as part of regenerate_session.
+
+- **regenerate_session** — RARE. Only when a foundational assumption changed broadly enough to likely affect MULTIPLE steps: environment/tooling swapped, a directory/naming convention changed, the project's architecture pivoted. For a single wrong step (with or without an overview tweak), use update_step instead — it's cheaper and more precise. You don't write the new intro or steps yourself here, just the reason — a dedicated backend pass rebuilds the entire plan (intro AND every step) reading the full conversation so far, so corrections and facts established anywhere in the chat carry through consistently everywhere they're relevant, not just patched into the intro while steps still silently reference old, wrong facts. Costly: every step's generated detail page is invalidated and regenerates next time the learner opens it.
+
+- **add_steps** — you identify steps that are missing from the current session and should be appended.
+
+- **spawn_node** — a distinct topic the learner raised that isn't covered anywhere in the existing map. The new node generates its own properly-sized opening session on its own, so don't worry about step count here. Call at most twice per response. When you spawn a node, keep your text reply to ONLY 1–2 sentences on *why* this deserves its own node — do NOT also answer the question in your text reply, since the full explanation belongs in the new node's opening session. Answering it here just duplicates what the new node is about to teach.
+
+- **mark_steps_done** — the learner has COMPLETED a pending step from the session checklist below: implemented it, run it, and confirmed it works. Never call this just because you explained a step — only because the learner demonstrated it's done. Don't re-mark steps already shown as done.
 
 11. Suggest marking this node complete only when the learner has met the node's stated outcome — working output, documented finding, explained concept, observed physical behavior — not just finished reading an explanation.
 
@@ -367,6 +473,162 @@ export function applyCodeContextUpdates(
   return files;
 }
 
+export interface ChatToolCall {
+  name: "update_step" | "regenerate_session" | "add_steps" | "spawn_node" | "mark_steps_done";
+  args: Record<string, unknown>;
+}
+
+const KNOWN_TOOL_NAMES = new Set<ChatToolCall["name"]>([
+  "update_step", "regenerate_session", "add_steps", "spawn_node", "mark_steps_done",
+]);
+
+const CHAT_TOOLS = [
+  {
+    type: "function" as const,
+    function: {
+      name: "update_step",
+      description: "Flag a specific step as needing to change, with a clear reason — you do NOT write the new title/description yourself. Call this when the learner asks to change a step, a step is clearly wrong, or you're self-correcting something you said earlier that affects that step — including a different tool, language, framework, dataset, board/hardware, or environment than the step originally assumed. Mentioning the change in your text reply is not enough; the reason you give here drives a dedicated rewrite of the step's title/description, or the learner will later see a step that still teaches the old, wrong approach. When you flag one step, also check the steps AFTER it in the plan — they often build on the same fact/file/tool/approach even if the learner only asked about this one step, so call this tool again for each later step that's now wrong too. There is no separate tool for editing the intro/overview alone — if this step's change also makes the session overview text wrong or outdated (e.g. the overview mentions the same fact you're correcting), include introUpdate (written by you, in full) in this same call to fix both together; and if the overview itself needs updating, that's usually a sign the correction runs through most or all steps, not just this one — check every step, not only the ones already discussed.",
+      parameters: {
+        type: "object",
+        properties: {
+          stepNumber: { type: "integer", description: "1-based step number to replace, matching the numbering the learner sees (the intro/overview is not a step — use introUpdate for that, never a stepNumber)" },
+          reason: { type: "string", description: "Specific explanation of what changed and why, including any concrete new facts (the specific tool/board/file/approach now in play) — this text is the ONLY input used to write the step's new title/description, so be as precise as you'd be if writing it yourself. A vague reason produces a vague step." },
+          introUpdate: { type: "string", description: "Optional. Only include this if the session's overview/intro text also needs to change as a result of this step's update. Write the full replacement intro text yourself — this one IS authored directly by you, unlike the step title/description above. Omit entirely if the overview is still accurate." },
+        },
+        required: ["stepNumber", "reason"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "regenerate_session",
+      description: "RARE. Rebuild the entire session plan (intro + every step) from scratch because a foundational assumption changed broadly enough to likely affect multiple steps: environment/tooling swapped, a directory/naming convention changed, the project's architecture pivoted. For a single wrong step, use update_step instead — it's cheaper and more precise.",
+      parameters: {
+        type: "object",
+        properties: {
+          reason: { type: "string", description: "One sentence: what changed and why the whole plan needs rebuilding" },
+        },
+        required: ["reason"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "add_steps",
+      description: "Append new steps to the end of the current session because you identified steps that are missing.",
+      parameters: {
+        type: "object",
+        properties: {
+          steps: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                title: { type: "string" },
+                description: { type: "string" },
+              },
+              required: ["title", "description"],
+            },
+          },
+        },
+        required: ["steps"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "spawn_node",
+      description: "Create a new, separate learning node for a distinct topic the learner raised that isn't covered anywhere in the existing map. The new node generates its own properly-sized opening session on its own — don't worry about step count here. Call at most twice per response.",
+      parameters: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "Short title, max 8 words" },
+          brief: { type: "string", description: "1-2 sentence description" },
+        },
+        required: ["title", "brief"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "mark_steps_done",
+      description: "Mark one or more mini-steps from the Session Checklist as completed because the learner demonstrated they implemented, ran, and confirmed them working — not just because you explained them. Don't re-mark steps already shown as done.",
+      parameters: {
+        type: "object",
+        properties: {
+          stepNumbers: {
+            type: "array",
+            items: { type: "integer" },
+            description: "1-based step numbers to mark done",
+          },
+        },
+        required: ["stepNumbers"],
+      },
+    },
+  },
+];
+
+interface RawToolCallAccumulator {
+  name: string;
+  argsText: string;
+}
+
+/**
+ * Like consumeCompletionStream, but also accumulates streamed tool-call deltas (OpenAI
+ * streams these incrementally too — name arrives once, arguments arrive in fragments
+ * keyed by index) and returns the fully-parsed calls as the generator's return value once
+ * the stream ends. Still throws on a non-clean finish, but "tool_calls" is a valid clean
+ * finish alongside "stop".
+ */
+async function* consumeCompletionStreamWithTools(
+  stream: AsyncIterable<{
+    choices: Array<{
+      delta?: {
+        content?: string | null;
+        tool_calls?: Array<{ index: number; function?: { name?: string; arguments?: string } }> | null;
+      };
+      finish_reason?: string | null;
+    }>;
+  }>
+): AsyncGenerator<string, ChatToolCall[], void> {
+  const accumulator = new Map<number, RawToolCallAccumulator>();
+  let finishReason: string | null = null;
+
+  for await (const chunk of stream) {
+    const choice = chunk.choices[0];
+    const delta = choice?.delta?.content;
+    if (delta) yield delta;
+
+    for (const tc of choice?.delta?.tool_calls ?? []) {
+      const existing = accumulator.get(tc.index) ?? { name: "", argsText: "" };
+      if (tc.function?.name) existing.name += tc.function.name;
+      if (tc.function?.arguments) existing.argsText += tc.function.arguments;
+      accumulator.set(tc.index, existing);
+    }
+
+    if (choice?.finish_reason) finishReason = choice.finish_reason;
+  }
+
+  if (finishReason && finishReason !== "stop" && finishReason !== "tool_calls") {
+    throw new Error(`AI response was cut off (${finishReason}) before finishing — please try again.`);
+  }
+
+  const calls: ChatToolCall[] = [];
+  for (const { name, argsText } of accumulator.values()) {
+    if (!KNOWN_TOOL_NAMES.has(name as ChatToolCall["name"])) continue;
+    try {
+      calls.push({ name: name as ChatToolCall["name"], args: JSON.parse(argsText) });
+    } catch {
+      // Malformed tool-call arguments (e.g. truncated JSON) — skip rather than crash.
+    }
+  }
+  return calls;
+}
+
 export async function* streamNodeChatMessage(
   node: DbNode,
   project: { title: string; ideaPrompt: string },
@@ -377,12 +639,17 @@ export async function* streamNodeChatMessage(
   recentConcerns: string[],
   codeFiles: CodeFile[],
   completedStepIndices: number[] = []
-): AsyncGenerator<string> {
-  const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles, history, completedStepIndices);
+): AsyncGenerator<string, ChatToolCall[], void> {
+  const cleanedHistory = cleanChatHistory(history);
+  const { recentHistory, olderSummary } = await condenseHistoryForModel(cleanedHistory);
+
+  const systemPrompt = buildRichSystemPrompt(
+    node, project, profile, mapCtx, recentConcerns, codeFiles, cleanedHistory, completedStepIndices, olderSummary
+  );
 
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
     { role: "system", content: systemPrompt },
-    ...history.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
+    ...recentHistory.map((m) => ({ role: m.role as "user" | "assistant", content: m.content })),
     { role: "user", content: userMessage },
   ];
 
@@ -390,15 +657,12 @@ export async function* streamNodeChatMessage(
     model: MODEL,
     max_tokens: 16384,
     messages,
+    tools: CHAT_TOOLS,
     stream: true,
   });
 
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
-    if (delta) {
-      yield delta;
-    }
-  }
+  const toolCalls = yield* consumeCompletionStreamWithTools(stream);
+  return toolCalls;
 }
 
 export async function* streamOpeningMessage(
@@ -407,24 +671,53 @@ export async function* streamOpeningMessage(
   profile: LearnerProfile | null,
   mapCtx: MapContext,
   recentConcerns: string[],
-  codeFiles: CodeFile[]
+  codeFiles: CodeFile[],
+  regeneration?: { reason: string; facts: string[] }
 ): AsyncGenerator<string> {
   const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles);
 
+  const isExplainerNode = node.isExtra
+    ? /understand|concept|what is|how does|introduc|overview|fundament|theory|explain|learn about/i.test(`${node.title} ${node.brief}`)
+    : false;
+
+  const stepStyleNote = isExplainerNode
+    ? `This is a concept-explainer node. Each step should explain a concept or idea progressively — break the concept into digestible understanding blocks. Steps are about building mental models, NOT about doing/building things.`
+    : `Each step should be a concrete, actionable task the learner will DO. Steps are about building, writing, running, or verifying something tangible.`;
+
+  const regenerationSection = regeneration
+    ? `\n## You are REGENERATING an existing session from scratch
+The learner already had a conversation on this node's previous plan. That plan is being thrown out and rebuilt because: ${regeneration.reason}
+${regeneration.facts.length > 0
+        ? `\nFacts and decisions already established in this session that the new plan MUST stay consistent with:\n${regeneration.facts.map((f) => `- ${f}`).join("\n")}\n`
+        : ""}
+`
+    : "";
+
   const userPrompt = `[Opening message for node: "${node.title}"]
-Generate a tutor opening message that:
-1. In 1–2 sentences, states what this session covers end-to-end.
-2. Lists ALL the mini-steps for this session as a numbered list. For each step, write the step title followed by a dash and 1–3 sentences explaining exactly what the learner will do and why — be concrete (mention specific commands, filenames, or functions). Example format:
-   1. Step title — What you'll do, why it matters, and any key detail or command.
-   2. Step title — Specific action with the exact tool/command/file involved.
-3. End with ONE specific checkpoint question that verifies the learner's current observable state before starting — based on what the completed nodes above say was accomplished. The question must be about what the learner can SEE or RUN right now, not about their code:
-   - Code projects: "Can you run [actual filename] and see [specific expected output/behaviour]?" e.g. "Can you run main.py and see a black Tkinter window appear?"
-   - Hardware: "Is [component] connected to [pin] and showing [expected behaviour]?" e.g. "Is the LED on pin 13 lighting up when you power the board?"
-   - Data/analytics: "Can you open [file] and confirm it has [expected columns/shape]?"
-   - Workflow tools: "Can you open [tool] and see [specific workflow/sheet] in [expected state]?"
-   - If this is the very first node with no completed prerequisites: skip the checkpoint and end with "Let's start with step 1." then give the first concrete action immediately.
-   - If this is a theory/math/concept node with no runnable artifact: skip the checkpoint and end with "Let's start with step 1." then begin the first explanation directly.
-   Keep the checkpoint to one sentence. Use the actual filename, tool, component, or command from this project — never a generic placeholder.
+${regenerationSection}
+Generate a structured session plan using EXACTLY this format with the slide markers. Do not add any text before [SLIDE:intro].
+
+[SLIDE:intro]
+In 1–3 sentences, state what this session covers end-to-end — what the learner will know or have built by the end. Then end with ONE specific checkpoint question that verifies the learner's current observable state before starting (based on what the completed nodes above say was accomplished). The question must be about what the learner can SEE or RUN right now. If this is the very first node OR a pure theory node with no runnable artifact, skip the checkpoint and instead write: "Let's get started — select the first step to begin."
+
+[SLIDE:1]
+**Step Title (short, action-oriented)**
+
+${isExplainerNode ? "Explain this concept/idea clearly with concrete examples. Build understanding progressively. 3–6 sentences." : "Describe exactly what the learner will do, which command/file/tool is involved, and what outcome to expect. 3–6 sentences."}
+
+[SLIDE:2]
+**Step Title**
+
+...
+
+(Continue for all steps — aim for 3–6 steps total. Each step should represent ~5–10 minutes of focused work.)
+
+Each step's title and description must be distinct and specific to what THAT step covers — never reuse or paraphrase another step's wording, and never let a later step just restate step 1.
+
+${stepStyleNote}
+
+Use the actual filenames, commands, component names, and domain terms from this project — never generic placeholders.
+Use LaTeX math notation ($...$ for inline, $$...$$ for block) for any formulas or equations.
 `;
 
   const stream = await openrouter.chat.completions.create({
@@ -437,12 +730,78 @@ Generate a tutor opening message that:
     stream: true,
   });
 
-  for await (const chunk of stream) {
-    const delta = chunk.choices[0]?.delta?.content;
-    if (delta) {
-      yield delta;
-    }
-  }
+  yield* consumeCompletionStream(stream);
+}
+
+export async function* streamStepDetail(
+  node: DbNode,
+  project: { title: string; ideaPrompt: string },
+  profile: LearnerProfile | null,
+  mapCtx: MapContext,
+  codeFiles: CodeFile[],
+  stepIndex: number,
+  stepTitle: string,
+  stepBrief: string
+): AsyncGenerator<string> {
+  const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, [], codeFiles);
+
+  const isExplainer = /understand|concept|what is|how does|introduc|overview|fundament|theory|explain|learn about/i.test(
+    `${node.title} ${node.brief} ${stepTitle}`
+  );
+
+  const langNote = profile?.preferredLanguage && profile.preferredLanguage !== "English"
+    ? `\nIMPORTANT: Respond entirely in ${profile.preferredLanguage}. Code, commands, and technical terms may stay in English.`
+    : "";
+
+  // Deliberately scoped to ONLY this step's own title/brief (plus the standard rich
+  // system prompt) — no sibling-step context. The title/brief is the single source of
+  // truth for what this page teaches, so a correction made via update_step (which
+  // rewrites title/brief) fully determines the regenerated content on its own, without
+  // depending on a stale view of the rest of the plan.
+  const prompt = `You are generating the detailed content page for step ${stepIndex} of the session on "${node.title}".
+
+## This step
+**${stepTitle}** — ${stepBrief}
+
+## Your task
+Write a detailed, self-contained content page for this step. Structure it as follows:
+
+${isExplainer ? `
+1. **What you'll understand** — One sentence stating the mental model you'll build.
+2. **The core idea** — 2–4 sentences explaining the concept clearly, using a concrete analogy or small example from the project.
+3. **Breaking it down** — Walk through each sub-concept or component with a short explanation. For every technical term, syntax, or idea appearing for the **first time**, add an inline callout:
+   > 💡 **term**: One-sentence plain-English definition.
+4. **Worked example** — Show the concept applied directly to "${project.title}" with code or diagrams if relevant.
+5. **Common misconception** — One thing learners often get wrong here and why.
+` : `
+1. **What you'll build** — One sentence stating the concrete outcome of this step.
+2. **Sub-steps** — Numbered list of exact actions. For each sub-step:
+   - State the precise action (exact command, file to edit, UI element to click)
+   - Show the code or command in a fenced block with the correct language tag
+   - For any flag, option, method, or concept appearing for the **first time**, add an inline callout immediately after:
+     > 💡 **term**: One-sentence plain-English definition.
+3. **Expected result** — What the learner should see or be able to verify when this step is done.
+4. **If something goes wrong** — The most likely failure mode and how to fix it.
+`}
+
+Rules:
+- Use the real filenames, commands, variable names, and domain terms from "${project.title}".
+- Keep every explanation short and concrete — no padding.
+- Code blocks must have correct language tags (\`\`\`bash, \`\`\`ts, etc.).
+- Never repeat content from other steps — stay focused on this step only.
+- Use LaTeX math notation ($...$ for inline, $$...$$ for block) for any formulas or equations.${langNote ? `\n${langNote}\n- IMPORTANT: Translate ALL section headings (e.g. "What you'll build", "Sub-steps", "Expected result", "If something goes wrong", "What you'll understand", "The core idea", "Breaking it down", "Worked example", "Common misconception") into the target language. Only code, commands, and technical identifiers stay in English.` : ""}`;
+
+  const stream = await openrouter.chat.completions.create({
+    model: MODEL,
+    max_tokens: 4096,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: prompt },
+    ],
+    stream: true,
+  });
+
+  yield* consumeCompletionStream(stream);
 }
 
 interface ExtraNodeClassification {
@@ -528,6 +887,109 @@ Write a crisp one-liner summary of the key takeaway or skill gained. Start with 
   } catch {
     return `Completed ${node.title}`;
   }
+}
+
+/**
+ * Condenses a chat history into a short list of durable facts/corrections/decisions
+ * (e.g. a renamed directory, a swapped tool version) for use when regenerating a
+ * session plan. Feeding the model a distilled fact list instead of the raw transcript
+ * keeps the regeneration prompt focused, rather than risking the transcript's bulk
+ * crowding out per-step variety in the output.
+ */
+export async function extractSessionFacts(history: ChatMessage[]): Promise<string[]> {
+  if (history.length === 0) return [];
+
+  const transcript = history
+    .slice(-30)
+    .map((m) => `${m.role === "user" ? "Learner" : "Tutor"}: ${m.content.slice(0, 500)}`)
+    .join("\n\n");
+
+  const prompt = `Below is a tutoring conversation transcript for one learning session.
+
+${transcript}
+
+Task: Extract a short bullet list of concrete facts, corrections, or decisions established during this conversation that any future instructions for this session MUST stay consistent with — e.g. a renamed directory, a different tool/library version, a corrected command, a naming or architecture decision. Do NOT include vague summary sentences, teaching content, or anything that isn't a durable fact/decision. If nothing durable was established, return an empty list.
+
+Respond ONLY with valid JSON, no markdown:
+{"facts": ["fact 1", "fact 2"]}`;
+
+  try {
+    const response = await openrouter.chat.completions.create({
+      model: MODEL,
+      max_tokens: 512,
+      messages: [{ role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    });
+    const content = response.choices[0]?.message?.content;
+    if (!content) return [];
+    const parsed = JSON.parse(content) as { facts?: unknown };
+    return Array.isArray(parsed.facts)
+      ? parsed.facts.filter((f): f is string => typeof f === "string" && f.trim().length > 0)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+interface StepUpdateResult {
+  title: string;
+  brief: string;
+}
+
+// Phase 1 of the two-phase step-update flow: the chat model only flags WHICH step needs
+// to change and WHY (via the update_step tool's stepNumber + reason) — it does not author
+// the new title/brief itself. This dedicated, narrowly-scoped call writes the new
+// title/brief, so its quality/consistency doesn't depend on whatever else was in the main
+// chat turn's context. Phase 2 (streamStepDetail) then regenerates the step's detail page
+// from ONLY this new title/brief — so the brief produced here must be concise but
+// self-contained enough to drive that regeneration on its own.
+export async function generateStepUpdate(
+  node: DbNode,
+  project: { title: string; ideaPrompt: string },
+  reason: string,
+  currentStep: { title: string; brief: string },
+  siblingSteps: { title: string; brief: string }[]
+): Promise<StepUpdateResult> {
+  const siblingText = siblingSteps.length > 0
+    ? siblingSteps.map((s) => `- **${s.title}** — ${s.brief}`).join("\n")
+    : "(none — this is the only other step)";
+
+  const prompt = `You are revising ONE step of an existing learning session plan for the project "${project.title}" (node: "${node.title}").
+
+## Why this step needs to change
+${reason}
+
+## This step's current version (being replaced)
+**${currentStep.title}** — ${currentStep.brief}
+
+## Other steps in this session (context only — do not rewrite these, just stay consistent with their style, scope, and granularity)
+${siblingText}
+
+## Your task
+Write the NEW title and brief for ONLY the step above, reflecting the reason for the change.
+- Title: an ultra-short noun phrase (1–2 words, matching the style of the other steps' titles) — no filler like "Fundamentals of" or "Introduction to".
+- Brief: 1–2 sentences describing a concrete OUTCOME (what the learner will build/implement/demonstrate), not just a topic.
+- The brief is the ONLY context that will be used to generate this step's full detailed walkthrough later — nothing else from this conversation carries forward. It must be concise but complete: capture every fact/decision from the reason above that changes what the learner will actually do in this step (e.g. a specific tool, board, file path, or approach), not just a vague restatement of the old brief.
+
+Respond ONLY with valid JSON, no markdown:
+{"title": "...", "brief": "..."}`;
+
+  const response = await openrouter.chat.completions.create({
+    model: MODEL,
+    max_tokens: 512,
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
+  });
+
+  const content = response.choices[0]?.message?.content;
+  if (!content) throw new Error("Step update generation returned no content");
+
+  const parsed = JSON.parse(content) as { title?: unknown; brief?: unknown };
+  if (typeof parsed.title !== "string" || !parsed.title.trim() || typeof parsed.brief !== "string" || !parsed.brief.trim()) {
+    throw new Error("Step update generation returned an invalid shape");
+  }
+
+  return { title: parsed.title.trim(), brief: parsed.brief.trim() };
 }
 
 interface SpawnedNode {

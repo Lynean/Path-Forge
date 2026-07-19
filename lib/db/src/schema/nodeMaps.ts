@@ -1,10 +1,11 @@
-import { pgTable, serial, integer, timestamp, text, real, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, timestamp, text, real, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { projectsTable } from "./projects";
 
 export const nodeMapsTable = pgTable("node_maps", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().unique(),
+  projectId: integer("project_id").notNull().unique().references(() => projectsTable.id, { onDelete: "cascade" }),
   rawJson: text("raw_json"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow().$onUpdate(() => new Date().toISOString()),
@@ -12,7 +13,7 @@ export const nodeMapsTable = pgTable("node_maps", {
 
 export const nodesTable = pgTable("nodes", {
   id: serial("id").primaryKey(),
-  mapId: integer("map_id").notNull(),
+  mapId: integer("map_id").notNull().references(() => nodeMapsTable.id, { onDelete: "cascade" }),
   title: text("title").notNull(),
   brief: text("brief").notNull(),
   status: text("status").notNull().default("locked"),
@@ -22,14 +23,19 @@ export const nodesTable = pgTable("nodes", {
   positionY: real("position_y"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow().$onUpdate(() => new Date().toISOString()),
-});
+}, (table) => [
+  index("nodes_map_id_idx").on(table.mapId),
+]);
 
 export const nodeEdgesTable = pgTable("node_edges", {
   id: serial("id").primaryKey(),
-  fromNodeId: integer("from_node_id").notNull(),
-  toNodeId: integer("to_node_id").notNull(),
+  fromNodeId: integer("from_node_id").notNull().references(() => nodesTable.id, { onDelete: "cascade" }),
+  toNodeId: integer("to_node_id").notNull().references(() => nodesTable.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
-});
+}, (table) => [
+  index("node_edges_from_node_id_idx").on(table.fromNodeId),
+  index("node_edges_to_node_id_idx").on(table.toNodeId),
+]);
 
 export const insertNodeMapSchema = createInsertSchema(nodeMapsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertNodeMap = z.infer<typeof insertNodeMapSchema>;

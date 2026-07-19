@@ -15,8 +15,8 @@ export interface LearnerProfile {
   educationLevel?: string | null;
   /** @nullable */
   major?: string | null;
-  interests: string;
-  experience: string;
+  /** Condensed free-text summary of the learner's interests and experience (built from onboarding MCQ answers) */
+  profileSummary: string;
   /** @nullable */
   preferredLanguage?: string | null;
   isComplete: boolean;

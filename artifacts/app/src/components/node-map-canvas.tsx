@@ -184,19 +184,32 @@ function layoutNodes(
     }
   }
 
-  const flowEdges: Edge[] = apiEdges.map((e) => ({
-    id: `e${e.id}`,
-    source: String(e.fromNodeId),
-    target: String(e.toNodeId),
-    markerEnd: {
-      type: MarkerType.ArrowClosed,
-      color: "hsl(var(--border))",
-      width: 14,
-      height: 14,
-    },
-    style: { stroke: "hsl(var(--border))", strokeWidth: 1.5 },
-    animated: false,
-  }));
+  const flowEdges: Edge[] = apiEdges.map((e) => {
+    // A prerequisite being completed is what actually unlocks the path forward, so the
+    // connection glows from the moment its source node is done — independent of whether
+    // the target itself has been completed yet.
+    const prerequisiteDone = nodeIdToApiNode.get(e.fromNodeId)?.status === "completed";
+
+    return {
+      id: `e${e.id}`,
+      source: String(e.fromNodeId),
+      target: String(e.toNodeId),
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: prerequisiteDone ? "hsl(var(--primary))" : "hsl(var(--border))",
+        width: 14,
+        height: 14,
+      },
+      style: prerequisiteDone
+        ? {
+            stroke: "hsl(var(--primary))",
+            strokeWidth: 2,
+            filter: "drop-shadow(0 0 6px hsl(var(--primary) / 0.9))",
+          }
+        : { stroke: "hsl(var(--border))", strokeWidth: 1.5 },
+      animated: prerequisiteDone,
+    };
+  });
 
   return { nodes: flowNodes, edges: flowEdges };
 }

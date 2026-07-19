@@ -91,7 +91,8 @@ PostgreSQL + Drizzle ORM. Schema lives in `lib/db/src/schema/`. All timestamps u
 
 - Both `/projects/:projectId` and `/projects/:projectId/nodes/:nodeId` render the `ProjectDetail` component (split-view).
 - `node-detail.tsx` exists but is **not routed** — it's kept for reference. Never route to it.
-- Node-level features go in `NodeChatPanel`, not `NodeDetail`.
+- Node-level features go in `NodeStepLightbox`, not `NodeChatPanel` (which is kept for reference only).
+- When a node is selected, `NodeStepLightbox` opens as a full-screen Dialog with two panels: left = step slider, right = AI side chat.
 - `NodeMapCanvas` accepts `onNodeClick` and `selectedNodeId` — selected node shows a ring highlight.
 
 ### Zod

@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState } from "react";
 import { useRoute, useLocation } from "wouter";
 import {
   useGetProject,
@@ -26,9 +26,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NodeMapCanvas } from "@/components/node-map-canvas";
-import { NodeChatPanel } from "@/components/node-chat-panel";
+import { NodeStepLightbox } from "@/components/node-step-lightbox";
 import { Sparkles, RefreshCw, AlertCircle, ArrowLeft, PenLine, Loader2, FileText } from "lucide-react";
-import { cn } from "@/lib/utils";
 
 export default function ProjectDetail() {
   const [matchExact, paramsExact] = useRoute("/projects/:projectId");
@@ -45,8 +44,6 @@ export default function ProjectDetail() {
   const [selectedNodeId, setSelectedNodeId] = useState<number | null>(routeNodeId);
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
-  const checklistPortalRef = useRef<HTMLDivElement>(null);
-
   const [showReviseModal, setShowReviseModal] = useState(false);
   const [reviseDescription, setReviseDescription] = useState("");
   const [isRevising, setIsRevising] = useState(false);
@@ -58,44 +55,7 @@ export default function ProjectDetail() {
   const [isSavingDetails, setIsSavingDetails] = useState(false);
   const [detailsError, setDetailsError] = useState<string | null>(null);
 
-  const [panelWidth, setPanelWidth] = useState(420);
-  const isDraggingRef = useRef(false);
-  const dragStartXRef = useRef(0);
-  const dragStartWidthRef = useRef(420);
-  const rafRef = useRef<number | null>(null);
 
-  const handleDragStart = useCallback((e: React.MouseEvent) => {
-    isDraggingRef.current = true;
-    dragStartXRef.current = e.clientX;
-    dragStartWidthRef.current = panelWidth;
-    e.preventDefault();
-  }, [panelWidth]);
-
-  useEffect(() => {
-    const onMouseMove = (e: MouseEvent) => {
-      if (!isDraggingRef.current) return;
-      if (rafRef.current !== null) return;
-      rafRef.current = requestAnimationFrame(() => {
-        const delta = dragStartXRef.current - e.clientX;
-        const next = Math.min(Math.max(dragStartWidthRef.current + delta, 300), 900);
-        setPanelWidth(next);
-        rafRef.current = null;
-      });
-    };
-    const onMouseUp = () => {
-      isDraggingRef.current = false;
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-    };
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", onMouseUp);
-    return () => {
-      document.removeEventListener("mousemove", onMouseMove);
-      document.removeEventListener("mouseup", onMouseUp);
-    };
-  }, []);
 
   const base = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -346,8 +306,7 @@ export default function ProjectDetail() {
       </div>
 
       <div className="flex-1 min-h-0 flex overflow-hidden" data-testid="map-area">
-        <div className={cn("relative overflow-hidden transition-all duration-300", selectedNode ? "flex-1 hidden md:block" : "flex-1")}>
-          <div ref={checklistPortalRef} className="absolute top-4 right-4 z-20 pointer-events-none" />
+        <div className="relative flex-1 overflow-hidden">
           {isGenerating ? (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 bg-background/80 backdrop-blur-sm z-10">
               <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
@@ -404,29 +363,16 @@ export default function ProjectDetail() {
           ) : null}
         </div>
 
+        {/* Node step lightbox — rendered as a Dialog overlay when a node is selected */}
         {selectedNode && (
-          <div
-            className="border-l border-border flex flex-col min-h-0 overflow-hidden relative hidden md:flex"
-            style={{ width: panelWidth, flexShrink: 0 }}
-            data-testid="chat-panel"
-          >
-            <div
-              onMouseDown={handleDragStart}
-              className="absolute left-0 top-0 h-full w-1.5 cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-10 group"
-              title="Drag to resize"
-            >
-              <div className="absolute left-0.5 top-1/2 -translate-y-1/2 w-0.5 h-8 rounded-full bg-border group-hover:bg-primary/50 transition-colors" />
-            </div>
-            <NodeChatPanel
-              key={selectedNode.id}
-              projectId={projectId}
-              node={selectedNode}
-              onClose={handleClosePanel}
-              onMapUpdate={handleMapUpdate}
-              checklistPortalTarget={checklistPortalRef}
-              onExtraNodeCreated={handleNodeClick}
-            />
-          </div>
+          <NodeStepLightbox
+            key={selectedNode.id}
+            projectId={projectId}
+            node={selectedNode}
+            onClose={handleClosePanel}
+            onMapUpdate={handleMapUpdate}
+            onExtraNodeCreated={handleNodeClick}
+          />
         )}
       </div>
 

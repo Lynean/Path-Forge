@@ -1,0 +1,125 @@
+SOURCE
+------
+Real chat export from a node "Cấu trúc code điều khiển cơ bản" (micro-ROS on Arduino,
+6DOF robot arm project, ROS2 Jazzy on WSL2). Learner profile has preferredLanguage =
+Vietnamese. Learner wrote every message in English; the tutor answered every time in
+Vietnamese. Session ran ~1 hour across step 1 ("install micro-ROS library") and step 2
+("basic control code structure"), and most of it was fighting the dev environment rather
+than learning ROS2/robotics content.
+
+Raw transcript archived out of this file's history if needed — this file is now the
+distilled issue/fix record per the AIExperience convention (see README.md in this folder).
+
+
+ISSUES FOUND
+------------
+
+1. [REJECTED — not an issue, intended behavior] Language mismatch
+   Originally flagged: tutor answered in Vietnamese (profile's preferredLanguage) even
+   though the learner wrote every message in English. Confirmed with the product owner
+   this is the desired behavior — the tutor should always respond in the learner's
+   preferredLanguage regardless of what language they type in. No change made to
+   `getLanguageInstruction()`. Recording this here so it doesn't get re-flagged as a bug
+   from a future transcript showing the same pattern.
+
+2. No upfront environment/toolchain decision — caused most of the wasted time
+   Step 1 assumed a Windows Arduino IDE + WSL-hosted files workflow. This is a known
+   fragile combination (Arduino IDE can't reliably read `\\wsl.localhost\...` paths).
+   The tutor only discovered this friction reactively, after the learner hit
+   "Cannot read 1 resource(s)" — and then cycled through FOUR different fixes in
+   sequence (map network path → PowerShell `subst` drive → copy to C:\ → switch to
+   arduino-cli → switch to PlatformIO) before landing on arduino-cli. A one-time
+   upfront question ("compile via the Windows Arduino IDE, or CLI tools inside WSL?")
+   would have avoided the whole detour.
+
+3. Hardware capability was never confirmed before generating board-specific code
+   The tutor generated micro-ROS code and instructions targeting a generic
+   Arduino/AVR board in step 2, despite this being a well-known non-starter — AVR chips
+   (Uno/Nano, 2KB RAM) cannot run micro-ROS (no POSIX headers, insufficient RAM). The
+   learner burned a full compile-fail cycle (`clockid_t` errors) before the tutor
+   caught it and asked what board was in use, then recommended ESP32-S2. This should
+   have been resolved BEFORE any code was generated — a competent instructor would
+   confirm board capability against the library's requirements as step 0, not step 2's
+   failure mode.
+
+4. update_step was never called despite two major corrections mid-session
+   The tutor changed its guidance on two things that directly invalidate the original
+   plan: (a) target board (generic Arduino → ESP32-S2), and (b) toolchain
+   (Arduino IDE GUI → arduino-cli/PlatformIO). Per the system prompt, self-correction
+   that affects a step's instructions is supposed to trigger an `update_step` tool call
+   so the step list (and the intro, via the optional introUpdate field) stays in sync.
+   Evidence this didn't happen: the persisted opening message (first message in this
+   session) still describes the ORIGINAL, now-superseded plan — generic Arduino IDE
+   zip-install instructions, and a plain `std_msgs/Int32` publisher — with no trace of
+   the ESP32-S2 pivot or the later `JointState`-based servo-control code the
+   conversation actually settled on (delivered only as a plain chat reply). A learner
+   revisiting Step 2's detail page later would see stale, contradicted instructions.
+
+5. Node granularity too coarse for an environment-heavy hardware project
+   Step 2 ("basic control code structure") ended up covering: writing initial pub/sub
+   code, choosing a toolchain, fixing board incompatibility, installing/debugging
+   arduino-cli (including a Snap sandboxing failure, a permissions failure, and a PATH
+   caching failure), AND rewriting the code for multi-servo JointState control. That's
+   5+ distinct concerns collapsed into one "~15-minute chunk" node, which is why this
+   single step needed 15+ back-and-forth messages to close out.
+
+
+FIXES — applied 2026-07-05, generalized to ALL project types (not just hardware/robotics)
+--------------------------------------------------------------------------------------
+
+Fixes 2, 3, and 5 were originally scoped to the HARDWARE/ROBOTICS-only rule blocks in
+`buildMapProjectTypeRules()`. Per instruction, generalized and moved into the UNIVERSAL
+"Rules for the node map" list in `generateNodeMap()` (aiNodeMap.ts) instead, so they
+apply to every project type — the underlying problems (unresolved foundational choices,
+unverified capability assumptions, coarse environment-setup nodes) aren't hardware-
+specific: they show up as language/framework choice in algorithm projects, compute/GPU
+capacity in ML projects, account tier/API scope in workflow-tools or enterprise-
+integration projects, lab environment access in cybersecurity projects, etc. The
+hardware/robotics-specific rules (datasheet nodes, wiring-before-code, etc.) were left
+in place as-is — they're still valid, more specific instantiations layered on top.
+
+Fix 2 — Applied. Surface foundational choices before generating steps that assume them
+  File: artifacts/api-server/src/lib/aiNodeMap.ts, generateNodeMap() universal rules.
+  New rule: "If the project depends on a foundational choice that shapes every later
+  step — a language/framework, an environment (local vs cloud, OS, cross-platform
+  toolchain), a specific tool/platform version, a dataset — and the description doesn't
+  already pin it down, resolve that choice as its own early node before any node that
+  assumes a particular answer."
+
+Fix 3 — Applied. Confirm capability before building on top of it
+  Same location. New rule: "Before any node whose instructions assume a specific
+  capability is available (compute/memory/storage capacity, account tier, API scope,
+  hardware resource, dataset size), include a node that confirms the learner's actual
+  setup meets that requirement."
+
+Fix 4 — Applied. update_step guidance strengthened for tool/framework/environment pivots
+  Files: artifacts/api-server/src/lib/aiNodeChat.ts — both the prose tool-usage guidance
+  (point 10, update_step bullet) and the update_step tool's own `description` field (the
+  latter matters too since it's part of what the model sees during tool selection, not
+  just the system prompt prose).
+  Both now explicitly state: recommending a different tool/language/framework/dataset/
+  board/environment than a step originally assumed is a self-correction just like a wrong
+  fact, is NOT satisfied by mentioning it in the text reply alone, and requires update_step
+  to rewrite the step's title/description (including any code/commands) to match.
+
+  Follow-up 2026-07-06 (same root cause, extended): a correction to step N frequently
+  applies to later steps too, even when the learner's message only referenced step N by
+  name (e.g. a renamed directory or swapped tool used again in step N+1, N+2, ...). Added
+  explicit guidance in both locations: when updating step N, check the steps AFTER it for
+  the same dependency and call update_step for each one that's now wrong, in the same
+  turn. Also added the inverse signal: if a correction requires an introUpdate, that's a
+  cue the change is likely project-wide — re-check every step, not just the one being
+  discussed, rather than only fixing the overview and the single step in front of you.
+
+Fix 5 — Applied. Dedicated environment/tooling-setup nodes, separate from logic nodes
+  Same location as Fix 2/3. New rule: "When a project involves non-trivial environment or
+  tooling setup (cross-compilation, cloud accounts, lab environments, cross-platform
+  builds, connector/API onboarding, GPU/cloud provisioning), give environment setup and
+  verification its own dedicated node(s), separate from nodes that write or configure
+  actual project logic."
+
+
+STATUS: Fixes 2–5 applied 2026-07-05 (generalized, universal rules). Fix 1 rejected —
+intended behavior, no change made. Next: watch future AIExperience transcripts (any
+project type) for whether these rules actually prevent the same class of friction before
+considering this closed.

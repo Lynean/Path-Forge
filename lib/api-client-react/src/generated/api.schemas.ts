@@ -22,8 +22,8 @@ export interface LearnerProfile {
   educationLevel?: string | null;
   /** @nullable */
   major?: string | null;
-  interests: string;
-  experience: string;
+  /** Condensed free-text summary of the learner's interests and experience (built from onboarding MCQ answers) */
+  profileSummary: string;
   /** @nullable */
   preferredLanguage?: string | null;
   isComplete: boolean;
@@ -38,8 +38,7 @@ export interface LearnerProfileInput {
   educationLevel?: string | null;
   /** @nullable */
   major?: string | null;
-  interests: string;
-  experience: string;
+  profileSummary: string;
   /** @nullable */
   preferredLanguage?: string | null;
   isComplete: boolean;
@@ -62,6 +61,32 @@ export interface Project {
   status: ProjectStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export type ProjectRecommendationCategory = typeof ProjectRecommendationCategory[keyof typeof ProjectRecommendationCategory];
+
+
+export const ProjectRecommendationCategory = {
+  algorithm: 'algorithm',
+  'math-impl': 'math-impl',
+  hardware: 'hardware',
+  robotics: 'robotics',
+  'workflow-tools': 'workflow-tools',
+  cybersecurity: 'cybersecurity',
+  'data-analytics': 'data-analytics',
+  'enterprise-integration': 'enterprise-integration',
+  'document-heavy': 'document-heavy',
+  theory: 'theory',
+} as const;
+
+export interface ProjectRecommendation {
+  title: string;
+  description: string;
+  category: ProjectRecommendationCategory;
+}
+
+export interface ProjectRecommendationsResponse {
+  recommendations: ProjectRecommendation[];
 }
 
 export interface ProjectInput {
@@ -186,5 +211,22 @@ export interface SpawnNodeInput {
      * @minLength 1
      */
   topic: string;
+}
+
+export interface VisualizeInput {
+  /**
+     * Concept or topic to visualize
+     * @minLength 1
+     * @maxLength 500
+     */
+  topic: string;
+}
+
+export interface StepDetailInput {
+  /** 1-based index of the step within the session plan */
+  stepIndex: number;
+  /** @minLength 1 */
+  stepTitle: string;
+  stepBrief?: string;
 }
 

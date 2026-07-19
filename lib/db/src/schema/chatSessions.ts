@@ -1,10 +1,11 @@
 import { pgTable, serial, integer, text, timestamp, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
+import { nodesTable } from "./nodeMaps";
 
 export const chatSessionsTable = pgTable("chat_sessions", {
   id: serial("id").primaryKey(),
-  nodeId: integer("node_id").notNull().unique(),
+  nodeId: integer("node_id").notNull().unique().references(() => nodesTable.id, { onDelete: "cascade" }),
   messages: jsonb("messages").notNull().default([]),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" }).notNull().defaultNow().$onUpdate(() => new Date().toISOString()),

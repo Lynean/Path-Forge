@@ -27,8 +27,7 @@ export const GetProfileResponse = zod.object({
   "age": zod.number().nullish(),
   "educationLevel": zod.string().nullish(),
   "major": zod.string().nullish(),
-  "interests": zod.string(),
-  "experience": zod.string(),
+  "profileSummary": zod.string().describe('Condensed free-text summary of the learner\'s interests and experience (built from onboarding MCQ answers)'),
   "preferredLanguage": zod.string().nullish(),
   "isComplete": zod.boolean(),
   "createdAt": zod.string(),
@@ -43,8 +42,7 @@ export const UpsertProfileBody = zod.object({
   "age": zod.number().nullish(),
   "educationLevel": zod.string().nullish(),
   "major": zod.string().nullish(),
-  "interests": zod.string(),
-  "experience": zod.string(),
+  "profileSummary": zod.string(),
   "preferredLanguage": zod.string().nullish(),
   "isComplete": zod.boolean()
 })
@@ -55,8 +53,7 @@ export const UpsertProfileResponse = zod.object({
   "age": zod.number().nullish(),
   "educationLevel": zod.string().nullish(),
   "major": zod.string().nullish(),
-  "interests": zod.string(),
-  "experience": zod.string(),
+  "profileSummary": zod.string().describe('Condensed free-text summary of the learner\'s interests and experience (built from onboarding MCQ answers)'),
   "preferredLanguage": zod.string().nullish(),
   "isComplete": zod.boolean(),
   "createdAt": zod.string(),
@@ -106,6 +103,32 @@ export const CreateProjectResponse = zod.object({
   "status": zod.enum(['draft', 'active', 'completed']),
   "createdAt": zod.string(),
   "updatedAt": zod.string()
+})
+
+
+/**
+ * Returns the ~10 example project ideas (title, description, category) already stored for the authenticated learner. If none have been generated yet, generates and persists a set based on their profile first. Does not regenerate an existing set — use the POST endpoint for that.
+ * @summary Get the learner's persisted project recommendations, generating them once if none exist yet
+ */
+export const GetProjectRecommendationsResponse = zod.object({
+  "recommendations": zod.array(zod.object({
+  "title": zod.string(),
+  "description": zod.string(),
+  "category": zod.enum(['algorithm', 'math-impl', 'hardware', 'robotics', 'workflow-tools', 'cybersecurity', 'data-analytics', 'enterprise-integration', 'document-heavy', 'theory'])
+}))
+})
+
+
+/**
+ * Always generates a new set of ~10 project ideas based on the learner's profile and overwrites the persisted set — used by the dashboard's "New ideas" action.
+ * @summary Regenerate and persist a fresh set of project recommendations
+ */
+export const RegenerateProjectRecommendationsResponse = zod.object({
+  "recommendations": zod.array(zod.object({
+  "title": zod.string(),
+  "description": zod.string(),
+  "category": zod.enum(['algorithm', 'math-impl', 'hardware', 'robotics', 'workflow-tools', 'cybersecurity', 'data-analytics', 'enterprise-integration', 'document-heavy', 'theory'])
+}))
 })
 
 
@@ -321,6 +344,46 @@ export const GetNodeOpeningMessageParams = zod.object({
 })
 
 export const GetNodeOpeningMessageResponse = zod.unknown()
+
+
+/**
+ * Lazily generates the detailed walkthrough for one step of a node's session plan; result is cached server-side so subsequent opens don't regenerate.
+ * @summary Generate and stream detailed content for a session step (streaming SSE)
+ */
+export const GetNodeStepDetailParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "nodeId": zod.coerce.number()
+})
+
+
+
+
+export const GetNodeStepDetailBody = zod.object({
+  "stepIndex": zod.number().describe('1-based index of the step within the session plan'),
+  "stepTitle": zod.string().min(1),
+  "stepBrief": zod.string().optional()
+})
+
+export const GetNodeStepDetailResponse = zod.unknown()
+
+
+/**
+ * @summary Generate and stream an interactive HTML visualization for a concept (streaming SSE)
+ */
+export const GetNodeVisualizationParams = zod.object({
+  "projectId": zod.coerce.number(),
+  "nodeId": zod.coerce.number()
+})
+
+export const getNodeVisualizationBodyTopicMax = 500;
+
+
+
+export const GetNodeVisualizationBody = zod.object({
+  "topic": zod.string().min(1).max(getNodeVisualizationBodyTopicMax).describe('Concept or topic to visualize')
+})
+
+export const GetNodeVisualizationResponse = zod.unknown()
 
 
 /**

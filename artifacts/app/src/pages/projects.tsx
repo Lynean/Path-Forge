@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
+import { useUser } from "@clerk/react";
 import { useListProjects, useCreateProject, useDeleteProject, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -11,14 +12,23 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import { Loader2, ArrowRight, ArrowLeft, Trash2 } from "lucide-react";
+import { Loader2, ArrowRight, ArrowLeft, Trash2, Rocket, FolderOpen } from "lucide-react";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { ProjectRecommendations } from "@/components/project-recommendations";
 
 interface FramingQuestion {
   id: string;
   question: string;
   options: string[];
+}
+
+function timeOfDayGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 5) return "Burning the midnight oil";
+  if (hour < 12) return "Good morning";
+  if (hour < 18) return "Good afternoon";
+  return "Good evening";
 }
 
 function buildEnrichedPrompt(
@@ -34,6 +44,7 @@ function buildEnrichedPrompt(
 
 export default function Projects() {
   const [, setLocation] = useLocation();
+  const { user } = useUser();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"form" | "loading" | "framing" | "refining">("form");
   const [title, setTitle] = useState("");
@@ -69,6 +80,13 @@ export default function Projects() {
   const handleOpenChange = (v: boolean) => {
     setOpen(v);
     if (!v) resetDialog();
+  };
+
+  const handleSelectRecommendation = (recTitle: string, recDescription: string) => {
+    resetDialog();
+    setTitle(recTitle);
+    setIdeaPrompt(recDescription);
+    setOpen(true);
   };
 
   const doCreate = (enrichedPrompt: string) => {
@@ -126,12 +144,24 @@ export default function Projects() {
 
   return (
     <div className="p-6 md:p-10 max-w-6xl mx-auto">
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-3xl font-mono font-bold tracking-tight">Projects</h1>
-        <Dialog open={open} onOpenChange={handleOpenChange}>
-          <DialogTrigger asChild>
-            <Button>New Project</Button>
-          </DialogTrigger>
+      <div className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-primary/10 via-card to-card px-6 py-7 mb-10">
+        <div className="absolute -top-16 -right-16 w-56 h-56 rounded-full bg-primary/10 blur-3xl pointer-events-none" />
+        <div className="relative flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+          <div>
+            <p className="text-xs font-mono uppercase tracking-widest text-primary/80 mb-1.5">
+              {timeOfDayGreeting()}{user?.firstName ? `, ${user.firstName}` : ""}
+            </p>
+            <h1 className="text-3xl font-mono font-bold tracking-tight mb-1.5">Your Learning Projects</h1>
+            <p className="text-sm text-muted-foreground max-w-xl">
+              Pick up where you left off, or start something new — every project builds you a personalized, step-by-step path.
+            </p>
+          </div>
+          <Dialog open={open} onOpenChange={handleOpenChange}>
+            <DialogTrigger asChild>
+              <Button size="lg" className="shrink-0 shadow-lg shadow-primary/20">
+                <Rocket className="w-4 h-4 mr-2" /> New Project
+              </Button>
+            </DialogTrigger>
           <DialogContent className="sm:max-w-[520px]">
 
             {/* ── Step 1: basic form ── */}
@@ -318,8 +348,16 @@ export default function Projects() {
             )}
 
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
+
+      <ProjectRecommendations onSelect={handleSelectRecommendation} />
+
+      <h2 className="text-lg font-mono font-bold tracking-tight mb-4 flex items-center gap-2">
+        <FolderOpen className="w-4 h-4 text-muted-foreground" />
+        Your Projects
+      </h2>
 
       {isLoading ? (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
@@ -331,16 +369,23 @@ export default function Projects() {
           ))}
         </div>
       ) : projects?.length === 0 ? (
-        <div className="text-center py-20 border border-dashed rounded-xl bg-card">
-          <p className="text-muted-foreground mb-4">No projects yet. Start by creating one.</p>
-          <Button onClick={() => setOpen(true)} variant="outline">
-            New Project
+        <div className="text-center py-20 border border-dashed border-border rounded-xl bg-card/50">
+          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center mx-auto mb-4">
+            <Rocket className="w-6 h-6 text-primary" />
+          </div>
+          <p className="font-mono font-semibold mb-1">No projects yet</p>
+          <p className="text-sm text-muted-foreground mb-5">Pick an idea above, or describe your own to get started.</p>
+          <Button onClick={() => setOpen(true)}>
+            <Rocket className="w-4 h-4 mr-2" /> New Project
           </Button>
         </div>
       ) : (
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
           {projects?.map((project) => (
-            <Card key={project.id} className="flex flex-col">
+            <Card
+              key={project.id}
+              className="flex flex-col transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-lg hover:shadow-primary/5"
+            >
               <CardHeader>
                 <div className="flex items-start justify-between gap-4">
                   <CardTitle className="font-mono text-xl line-clamp-1">{project.title}</CardTitle>
