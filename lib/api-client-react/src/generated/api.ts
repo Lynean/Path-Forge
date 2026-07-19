@@ -30,10 +30,13 @@ import type {
   NodeStatusUpdate,
   Project,
   ProjectInput,
+  ProjectRecommendationsResponse,
   ProjectStats,
   ProjectUpdate,
   RevisePlanInput,
-  SpawnNodeInput
+  SpawnNodeInput,
+  StepDetailInput,
+  VisualizeInput
 } from './api.schemas';
 
 import { customFetch } from '../custom-fetch';
@@ -505,6 +508,155 @@ export const useCreateProject = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getCreateProjectMutationOptions(options));
+    }
+
+export const getGetProjectRecommendationsUrl = () => {
+
+
+
+
+  return `/api/projects/recommendations`
+}
+
+/**
+ * Returns the ~10 example project ideas (title, description, category) already stored for the authenticated learner. If none have been generated yet, generates and persists a set based on their profile first. Does not regenerate an existing set — use the POST endpoint for that.
+ * @summary Get the learner's persisted project recommendations, generating them once if none exist yet
+ */
+export const getProjectRecommendations = async ( options?: RequestInit): Promise<ProjectRecommendationsResponse> => {
+
+  return customFetch<ProjectRecommendationsResponse>(getGetProjectRecommendationsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectRecommendationsQueryKey = () => {
+    return [
+    `/api/projects/recommendations`
+    ] as const;
+    }
+
+
+export const getGetProjectRecommendationsQueryOptions = <TData = Awaited<ReturnType<typeof getProjectRecommendations>>, TError = ErrorType<ErrorResponse>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectRecommendations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectRecommendationsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectRecommendations>>> = ({ signal }) => getProjectRecommendations({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectRecommendations>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectRecommendationsQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectRecommendations>>>
+export type GetProjectRecommendationsQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get the learner's persisted project recommendations, generating them once if none exist yet
+ */
+
+export function useGetProjectRecommendations<TData = Awaited<ReturnType<typeof getProjectRecommendations>>, TError = ErrorType<ErrorResponse>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectRecommendations>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectRecommendationsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getRegenerateProjectRecommendationsUrl = () => {
+
+
+
+
+  return `/api/projects/recommendations`
+}
+
+/**
+ * Always generates a new set of ~10 project ideas based on the learner's profile and overwrites the persisted set — used by the dashboard's "New ideas" action.
+ * @summary Regenerate and persist a fresh set of project recommendations
+ */
+export const regenerateProjectRecommendations = async ( options?: RequestInit): Promise<ProjectRecommendationsResponse> => {
+
+  return customFetch<ProjectRecommendationsResponse>(getRegenerateProjectRecommendationsUrl(),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+export const getRegenerateProjectRecommendationsMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateProjectRecommendations>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof regenerateProjectRecommendations>>, TError,void, TContext> => {
+
+const mutationKey = ['regenerateProjectRecommendations'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof regenerateProjectRecommendations>>, void> = () => {
+
+
+          return  regenerateProjectRecommendations(requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RegenerateProjectRecommendationsMutationResult = NonNullable<Awaited<ReturnType<typeof regenerateProjectRecommendations>>>
+
+    export type RegenerateProjectRecommendationsMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Regenerate and persist a fresh set of project recommendations
+ */
+export const useRegenerateProjectRecommendations = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof regenerateProjectRecommendations>>, TError,void, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof regenerateProjectRecommendations>>,
+        TError,
+        void,
+        TContext
+      > => {
+      return useMutation(getRegenerateProjectRecommendationsMutationOptions(options));
     }
 
 export const getGetProjectUrl = (projectId: number,) => {
@@ -1247,6 +1399,153 @@ export const useGetNodeOpeningMessage = <TError = ErrorType<ErrorResponse>,
         TContext
       > => {
       return useMutation(getGetNodeOpeningMessageMutationOptions(options));
+    }
+
+export const getGetNodeStepDetailUrl = (projectId: number,
+    nodeId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/nodes/${nodeId}/step-detail`
+}
+
+/**
+ * Lazily generates the detailed walkthrough for one step of a node's session plan; result is cached server-side so subsequent opens don't regenerate.
+ * @summary Generate and stream detailed content for a session step (streaming SSE)
+ */
+export const getNodeStepDetail = async (projectId: number,
+    nodeId: number,
+    stepDetailInput: StepDetailInput, options?: RequestInit): Promise<unknown> => {
+
+  return customFetch<unknown>(getGetNodeStepDetailUrl(projectId,nodeId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(stepDetailInput)
+  }
+);}
+
+
+
+
+export const getGetNodeStepDetailMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getNodeStepDetail>>, TError,{projectId: number;nodeId: number;data: BodyType<StepDetailInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getNodeStepDetail>>, TError,{projectId: number;nodeId: number;data: BodyType<StepDetailInput>}, TContext> => {
+
+const mutationKey = ['getNodeStepDetail'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getNodeStepDetail>>, {projectId: number;nodeId: number;data: BodyType<StepDetailInput>}> = (props) => {
+          const {projectId,nodeId,data} = props ?? {};
+
+          return  getNodeStepDetail(projectId,nodeId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetNodeStepDetailMutationResult = NonNullable<Awaited<ReturnType<typeof getNodeStepDetail>>>
+    export type GetNodeStepDetailMutationBody = BodyType<StepDetailInput>
+    export type GetNodeStepDetailMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Generate and stream detailed content for a session step (streaming SSE)
+ */
+export const useGetNodeStepDetail = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getNodeStepDetail>>, TError,{projectId: number;nodeId: number;data: BodyType<StepDetailInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getNodeStepDetail>>,
+        TError,
+        {projectId: number;nodeId: number;data: BodyType<StepDetailInput>},
+        TContext
+      > => {
+      return useMutation(getGetNodeStepDetailMutationOptions(options));
+    }
+
+export const getGetNodeVisualizationUrl = (projectId: number,
+    nodeId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/nodes/${nodeId}/visualize`
+}
+
+/**
+ * @summary Generate and stream an interactive HTML visualization for a concept (streaming SSE)
+ */
+export const getNodeVisualization = async (projectId: number,
+    nodeId: number,
+    visualizeInput: VisualizeInput, options?: RequestInit): Promise<unknown> => {
+
+  return customFetch<unknown>(getGetNodeVisualizationUrl(projectId,nodeId),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(visualizeInput)
+  }
+);}
+
+
+
+
+export const getGetNodeVisualizationMutationOptions = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getNodeVisualization>>, TError,{projectId: number;nodeId: number;data: BodyType<VisualizeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof getNodeVisualization>>, TError,{projectId: number;nodeId: number;data: BodyType<VisualizeInput>}, TContext> => {
+
+const mutationKey = ['getNodeVisualization'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof getNodeVisualization>>, {projectId: number;nodeId: number;data: BodyType<VisualizeInput>}> = (props) => {
+          const {projectId,nodeId,data} = props ?? {};
+
+          return  getNodeVisualization(projectId,nodeId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type GetNodeVisualizationMutationResult = NonNullable<Awaited<ReturnType<typeof getNodeVisualization>>>
+    export type GetNodeVisualizationMutationBody = BodyType<VisualizeInput>
+    export type GetNodeVisualizationMutationError = ErrorType<ErrorResponse>
+
+    /**
+ * @summary Generate and stream an interactive HTML visualization for a concept (streaming SSE)
+ */
+export const useGetNodeVisualization = <TError = ErrorType<ErrorResponse>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof getNodeVisualization>>, TError,{projectId: number;nodeId: number;data: BodyType<VisualizeInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof getNodeVisualization>>,
+        TError,
+        {projectId: number;nodeId: number;data: BodyType<VisualizeInput>},
+        TContext
+      > => {
+      return useMutation(getGetNodeVisualizationMutationOptions(options));
     }
 
 export const getSpawnExtraNodeUrl = (projectId: number,

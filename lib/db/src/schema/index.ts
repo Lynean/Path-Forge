@@ -6,3 +6,4 @@ export * from "./chatSessions";
 export * from "./conversations";
 export * from "./messages";
 export * from "./projectCodeContext";
+export * from "./learnerRecommendations";

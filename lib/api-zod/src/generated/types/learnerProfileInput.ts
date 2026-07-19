@@ -13,8 +13,7 @@ export interface LearnerProfileInput {
   educationLevel?: string | null;
   /** @nullable */
   major?: string | null;
-  interests: string;
-  experience: string;
+  profileSummary: string;
   /** @nullable */
   preferredLanguage?: string | null;
   isComplete: boolean;

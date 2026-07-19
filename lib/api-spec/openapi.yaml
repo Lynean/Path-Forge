@@ -109,6 +109,44 @@ paths:
               schema:
                 $ref: "#/components/schemas/Project"
 
+  /projects/recommendations:
+    get:
+      operationId: getProjectRecommendations
+      tags: [projects]
+      summary: Get the learner's persisted project recommendations, generating them once if none exist yet
+      description: Returns the ~10 example project ideas (title, description, category) already stored for the authenticated learner. If none have been generated yet, generates and persists a set based on their profile first. Does not regenerate an existing set — use the POST endpoint for that.
+      responses:
+        "200":
+          description: Recommended project ideas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRecommendationsResponse"
+        "500":
+          description: Generation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    post:
+      operationId: regenerateProjectRecommendations
+      tags: [projects]
+      summary: Regenerate and persist a fresh set of project recommendations
+      description: Always generates a new set of ~10 project ideas based on the learner's profile and overwrites the persisted set — used by the dashboard's "New ideas" action.
+      responses:
+        "200":
+          description: New recommended project ideas
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectRecommendationsResponse"
+        "500":
+          description: Generation failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /projects/{projectId}:
     get:
       operationId: getProject
@@ -374,6 +412,87 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /projects/{projectId}/nodes/{nodeId}/step-detail:
+    post:
+      operationId: getNodeStepDetail
+      tags: [nodemap]
+      summary: Generate and stream detailed content for a session step (streaming SSE)
+      description: Lazily generates the detailed walkthrough for one step of a node's session plan; result is cached server-side so subsequent opens don't regenerate.
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StepDetailInput"
+      responses:
+        "200":
+          description: SSE stream of step detail chunks
+          content:
+            text/event-stream: {}
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /projects/{projectId}/nodes/{nodeId}/visualize:
+    post:
+      operationId: getNodeVisualization
+      tags: [nodemap]
+      summary: Generate and stream an interactive HTML visualization for a concept (streaming SSE)
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+        - name: nodeId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VisualizeInput"
+      responses:
+        "200":
+          description: SSE stream of visualization HTML chunks
+          content:
+            text/event-stream: {}
+        "400":
+          description: Invalid request body
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   /projects/{projectId}/nodes/{nodeId}/spawn:
     post:
       operationId: spawnExtraNode
@@ -477,10 +596,9 @@ components:
           type: ["string", "null"]
         major:
           type: ["string", "null"]
-        interests:
+        profileSummary:
           type: string
-        experience:
-          type: string
+          description: Condensed free-text summary of the learner's interests and experience (built from onboarding MCQ answers)
         preferredLanguage:
           type: ["string", "null"]
         isComplete:
@@ -492,8 +610,7 @@ components:
       required:
         - id
         - clerkUserId
-        - interests
-        - experience
+        - profileSummary
         - isComplete
         - createdAt
         - updatedAt
@@ -507,17 +624,14 @@ components:
           type: ["string", "null"]
         major:
           type: ["string", "null"]
-        interests:
-          type: string
-        experience:
+        profileSummary:
           type: string
         preferredLanguage:
           type: ["string", "null"]
         isComplete:
           type: boolean
       required:
-        - interests
-        - experience
+        - profileSummary
         - isComplete
 
     Project:
@@ -546,6 +660,31 @@ components:
         - status
         - createdAt
         - updatedAt
+
+    ProjectRecommendation:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+          enum: [algorithm, math-impl, hardware, robotics, workflow-tools, cybersecurity, data-analytics, enterprise-integration, document-heavy, theory]
+      required:
+        - title
+        - description
+        - category
+
+    ProjectRecommendationsResponse:
+      type: object
+      properties:
+        recommendations:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProjectRecommendation"
+      required:
+        - recommendations
 
     ProjectInput:
       type: object
@@ -726,3 +865,29 @@ components:
           description: Topic or reason for the extra node to spawn
       required:
         - topic
+
+    VisualizeInput:
+      type: object
+      properties:
+        topic:
+          type: string
+          minLength: 1
+          maxLength: 500
+          description: Concept or topic to visualize
+      required:
+        - topic
+
+    StepDetailInput:
+      type: object
+      properties:
+        stepIndex:
+          type: integer
+          description: 1-based index of the step within the session plan
+        stepTitle:
+          type: string
+          minLength: 1
+        stepBrief:
+          type: string
+      required:
+        - stepIndex
+        - stepTitle

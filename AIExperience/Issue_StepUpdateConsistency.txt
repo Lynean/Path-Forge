@@ -1,0 +1,82 @@
+SOURCE
+------
+No raw transcript this time — reported directly by the product owner from observed
+behavior: "the agent update the changes not consistently." No specific export attached,
+but the underlying architectural issue was clear enough to act on directly.
+
+
+ISSUE FOUND
+-----------
+
+update_step let the chat model author the step's new title/description itself, inline,
+as part of a normal conversational turn — using whatever context (chat history, rich
+system prompt, current conversational framing) happened to be active in that turn. This
+made the quality and consistency of step rewrites depend on the surrounding conversation
+rather than on a stable, repeatable process, so a step's rewritten content could:
+- drift in style/scope/granularity from sibling steps (no explicit comparison happened)
+- be terser or more verbose depending on how much the chat model had already "spent" on
+  its conversational reply in the same turn
+- inconsistently capture the actual reason for the change, since the model was writing
+  reply text and step content simultaneously rather than treating them as separate jobs
+
+Separately (see streamStepDetail, artifacts/api-server/src/lib/aiNodeChat.ts), the
+detail-page generator was ALSO given the full list of sibling steps ("Full session plan
+— for context only") on every regeneration. Mixing "what should this page teach" (driven
+by the step's own title/brief) with "what do other steps say" created another axis of
+inconsistency: the detail page's content could vary in subtle ways run to run even when
+the title/brief hadn't changed, because sibling-step framing shifted alongside it.
+
+
+FIX — applied 2026-07-06
+-------------------------
+
+Split generation into two clean phases with disjoint context, so the same input reliably
+produces the same shape of output.
+
+Phase 1 — step name/intro (what changed)
+  New function: generateStepUpdate() in aiNodeChat.ts. A dedicated, narrowly-scoped AI
+  call (not part of the chat model's conversational turn) that takes ONLY:
+  - the reason for the change (now required on the update_step tool call — the chat
+    model flags stepNumber + reason, but no longer writes title/description itself)
+  - the step's CURRENT title/brief (what's being replaced)
+  - sibling steps' title/brief, for consistency of style/scope/granularity
+  Output: new {title, brief}. The tool schema's `reason` field is documented as the ONLY
+  input driving this rewrite, so a vague reason produces a vague step — the chat model is
+  told to be as specific as if it were writing the step itself.
+
+Phase 2 — step content (the detail page)
+  streamStepDetail() in aiNodeChat.ts had its `allSteps` (sibling-step) context removed
+  entirely. It now generates purely from the step's own current title/brief plus its
+  standard system prompt (project/profile/code context) — nothing about sibling steps.
+  This makes the brief the single source of truth for what a step's detail page teaches:
+  once Phase 1 produces a new title/brief, Phase 2's regeneration is fully determined by
+  that alone, closing the loop cleanly (Phase 1 output → Phase 2 input, nothing else).
+
+Files changed:
+  - artifacts/api-server/src/lib/aiNodeChat.ts: added generateStepUpdate(); removed
+    allSteps param from streamStepDetail(); update_step tool schema now takes
+    stepNumber + reason (required) instead of stepNumber + title + description
+    (introUpdate unchanged — still authored directly by the chat model, since it's a
+    single free-text field, not per-step content requiring cross-step consistency)
+  - artifacts/api-server/src/routes/nodeMap.ts: update_step tool-call handling now
+    parses the current opening message's slides for the flagged step's current
+    title/brief + siblings, calls generateStepUpdate() per flagged step (Promise.allSettled
+    so one failed step doesn't block the others), and applies the result the same way
+    as before; added parseStepSlideBody() helper; /step-detail route no longer accepts
+    or forwards allSteps
+  - lib/api-spec/openapi.yaml: removed allSteps from StepDetailInput, regenerated codegen
+  - artifacts/app/src/components/node-step-lightbox.tsx: stopped computing/sending
+    allSteps in the step-detail request
+
+Note on scope: this two-phase split was requested specifically for step name/intro vs.
+step content, and applies regardless of project type (it's in the shared chat/detail
+generation code, not a per-type rule) — no further generalization needed here, unlike
+the Issue_ArduinoWSL.txt fixes which were type-specific rules moved to the universal list.
+
+
+STATUS: Applied 2026-07-06. Watch for: (a) whether Phase 1's reason-driven rewrites stay
+as specific/accurate as the old inline authoring now that the chat model can't see the
+step content it's producing, (b) whether removing sibling-step context from Phase 2
+detail generation ever causes a detail page to feel disconnected from the rest of the
+plan — if so, reconsider whether Phase 2 needs a LIGHTER form of sibling awareness (e.g.
+just titles, not briefs) rather than reverting to the full list.

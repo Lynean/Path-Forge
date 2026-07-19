@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, count, sql, inArray } from "drizzle-orm";
-import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, learnerProfilesTable, chatSessionsTable, projectCodeContextTable } from "@workspace/db";
+import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, learnerProfilesTable, chatSessionsTable, projectCodeContextTable, learnerRecommendationsTable } from "@workspace/db";
 import {
   CreateProjectBody,
   CreateProjectResponse,
@@ -15,9 +15,10 @@ import {
   GetProjectStatsResponse,
   GetNodeMapParams,
   GetNodeMapResponse,
+  GetProjectRecommendationsResponse,
 } from "@workspace/api-zod";
 import { requireAuth, getAuthUserId } from "../lib/auth";
-import { generateFramingQuestions, generateRefinedDescription } from "../lib/aiNodeMap";
+import { generateFramingQuestions, generateRefinedDescription, generateProjectRecommendations } from "../lib/aiNodeMap";
 
 const router: IRouter = Router();
 
@@ -86,6 +87,55 @@ router.post("/projects", requireAuth, async (req, res): Promise<void> => {
     .returning();
 
   res.status(201).json(CreateProjectResponse.parse(project));
+});
+
+async function generateAndSaveRecommendations(userId: string) {
+  const [profile] = await db.select().from(learnerProfilesTable).where(eq(learnerProfilesTable.clerkUserId, userId));
+  const existing = await db.select({ title: projectsTable.title }).from(projectsTable).where(eq(projectsTable.clerkUserId, userId));
+
+  const result = await generateProjectRecommendations(profile ?? null, existing.map((p) => p.title));
+
+  await db.insert(learnerRecommendationsTable)
+    .values({ clerkUserId: userId, recommendations: result.recommendations as any })
+    .onConflictDoUpdate({
+      target: learnerRecommendationsTable.clerkUserId,
+      set: { recommendations: result.recommendations as any, updatedAt: new Date().toISOString() },
+    });
+
+  return result;
+}
+
+// Registered before "/projects/:projectId" — Express matches routes in registration
+// order, so the param route would otherwise swallow this static path.
+router.get("/projects/recommendations", requireAuth, async (req, res): Promise<void> => {
+  const userId = getAuthUserId(req);
+
+  try {
+    const [stored] = await db.select().from(learnerRecommendationsTable).where(eq(learnerRecommendationsTable.clerkUserId, userId));
+    if (stored && stored.recommendations.length > 0) {
+      res.json(GetProjectRecommendationsResponse.parse({ recommendations: stored.recommendations }));
+      return;
+    }
+
+    const result = await generateAndSaveRecommendations(userId);
+    res.json(GetProjectRecommendationsResponse.parse(result));
+  } catch (err: any) {
+    req.log.error({ err }, "project recommendations generation failed");
+    res.status(500).json({ error: err?.message ?? "Failed to generate recommendations" });
+  }
+});
+
+// Always regenerates and overwrites the persisted set — the dashboard's "New ideas" action.
+router.post("/projects/recommendations", requireAuth, async (req, res): Promise<void> => {
+  const userId = getAuthUserId(req);
+
+  try {
+    const result = await generateAndSaveRecommendations(userId);
+    res.json(GetProjectRecommendationsResponse.parse(result));
+  } catch (err: any) {
+    req.log.error({ err }, "project recommendations regeneration failed");
+    res.status(500).json({ error: err?.message ?? "Failed to regenerate recommendations" });
+  }
 });
 
 router.get("/projects/:projectId", requireAuth, async (req, res): Promise<void> => {

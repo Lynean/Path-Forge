@@ -1,23 +1,25 @@
 import { useState, useEffect } from "react";
-import { useGetProfile, useUpsertProfile } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useGetProfile, useUpsertProfile, getGetProfileQueryKey } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { LANGUAGE_OPTIONS } from "@/lib/profile-questions";
 
 export default function Profile() {
   const { data: profile, isLoading } = useGetProfile();
   const upsertProfile = useUpsertProfile();
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const [formData, setFormData] = useState({
     age: "",
     educationLevel: "",
     major: "",
-    interests: "",
-    experience: "",
+    profileSummary: "",
     preferredLanguage: ""
   });
 
@@ -27,8 +29,7 @@ export default function Profile() {
         age: profile.age?.toString() || "",
         educationLevel: profile.educationLevel || "",
         major: profile.major || "",
-        interests: profile.interests || "",
-        experience: profile.experience || "",
+        profileSummary: profile.profileSummary || "",
         preferredLanguage: profile.preferredLanguage || ""
       });
     }
@@ -42,14 +43,16 @@ export default function Profile() {
           age: formData.age ? parseInt(formData.age, 10) : null,
           educationLevel: formData.educationLevel || null,
           major: formData.major || null,
-          interests: formData.interests,
-          experience: formData.experience,
+          profileSummary: formData.profileSummary,
           preferredLanguage: formData.preferredLanguage || null,
           isComplete: true
         }
       },
       {
-        onSuccess: () => {
+        onSuccess: (savedProfile) => {
+          // Keep the shared profile query (also read by App.tsx's auth gate) in sync so
+          // other views don't keep serving pre-save data.
+          queryClient.setQueryData(getGetProfileQueryKey(), savedProfile);
           toast({ title: "Profile updated" });
         }
       }
@@ -95,21 +98,9 @@ export default function Profile() {
                 <SelectValue placeholder="Select language" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="English">English</SelectItem>
-                <SelectItem value="Vietnamese">Vietnamese</SelectItem>
-                <SelectItem value="Chinese (Simplified)">Chinese (Simplified)</SelectItem>
-                <SelectItem value="Chinese (Traditional)">Chinese (Traditional)</SelectItem>
-                <SelectItem value="Spanish">Spanish</SelectItem>
-                <SelectItem value="French">French</SelectItem>
-                <SelectItem value="German">German</SelectItem>
-                <SelectItem value="Japanese">Japanese</SelectItem>
-                <SelectItem value="Korean">Korean</SelectItem>
-                <SelectItem value="Portuguese">Portuguese</SelectItem>
-                <SelectItem value="Arabic">Arabic</SelectItem>
-                <SelectItem value="Hindi">Hindi</SelectItem>
-                <SelectItem value="Indonesian">Indonesian</SelectItem>
-                <SelectItem value="Thai">Thai</SelectItem>
-                <SelectItem value="Russian">Russian</SelectItem>
+                {LANGUAGE_OPTIONS.map((lang) => (
+                  <SelectItem key={lang} value={lang}>{lang}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -121,22 +112,16 @@ export default function Profile() {
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="interests">Interests</Label>
-          <Textarea 
-            id="interests" 
-            value={formData.interests}
-            onChange={(e) => setFormData({ ...formData, interests: e.target.value })}
-            className="min-h-[120px]"
-          />
-        </div>
-
-        <div className="space-y-2">
-          <Label htmlFor="experience">Experience</Label>
-          <Textarea 
-            id="experience" 
-            value={formData.experience}
-            onChange={(e) => setFormData({ ...formData, experience: e.target.value })}
-            className="min-h-[120px]"
+          <Label htmlFor="profileSummary">Interests &amp; Experience</Label>
+          <p className="text-xs text-muted-foreground">
+            Generated from your onboarding answers — edit directly here, or redo the guided questions during{" "}
+            <a href="/onboarding" className="underline hover:text-foreground">setup</a>.
+          </p>
+          <Textarea
+            id="profileSummary"
+            value={formData.profileSummary}
+            onChange={(e) => setFormData({ ...formData, profileSummary: e.target.value })}
+            className="min-h-[160px]"
           />
         </div>
 

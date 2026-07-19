@@ -134,8 +134,7 @@ export async function generateFramingQuestions(
         profile.age ? `Age: ${profile.age}` : null,
         profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
         profile.major ? `Field/Major: ${profile.major}` : null,
-        profile.interests ? `Interests: ${profile.interests}` : null,
-        profile.experience ? `Experience: ${profile.experience}` : null,
+        profile.profileSummary ? profile.profileSummary : null,
         profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
       ]
         .filter(Boolean)
@@ -196,8 +195,7 @@ export async function generateRefinedDescription(
         profile.age ? `Age: ${profile.age}` : null,
         profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
         profile.major ? `Field/Major: ${profile.major}` : null,
-        profile.interests ? `Interests: ${profile.interests}` : null,
-        profile.experience ? `Experience: ${profile.experience}` : null,
+        profile.profileSummary ? profile.profileSummary : null,
         profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
       ]
         .filter(Boolean)
@@ -238,6 +236,88 @@ Return ONLY the rewritten description, no quotes, no preamble.${langInstruction}
   return content;
 }
 
+const RECOMMENDATION_CATEGORIES: ProjectType[] = [
+  "algorithm", "math-impl", "hardware", "robotics", "workflow-tools",
+  "cybersecurity", "data-analytics", "enterprise-integration", "document-heavy", "theory",
+];
+
+export interface ProjectRecommendation {
+  title: string;
+  description: string;
+  category: ProjectType;
+}
+
+export interface ProjectRecommendationsResponse {
+  recommendations: ProjectRecommendation[];
+}
+
+export async function generateProjectRecommendations(
+  profile: LearnerProfile | null,
+  existingProjectTitles: string[]
+): Promise<ProjectRecommendationsResponse> {
+  const profileContext = profile
+    ? [
+        profile.age ? `Age: ${profile.age}` : null,
+        profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
+        profile.major ? `Field/Major: ${profile.major}` : null,
+        profile.profileSummary ? profile.profileSummary : null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : null;
+
+  const existingText = existingProjectTitles.length > 0
+    ? `\nThe learner already has these projects — do not suggest duplicates or near-duplicates of them:\n${existingProjectTitles.map((t) => `- ${t}`).join("\n")}`
+    : "";
+
+  const langInstruction = getLangInstruction(profile);
+
+  const prompt = `You are suggesting project ideas to a self-directed learner on a project-based learning platform. Each idea becomes a full personalized learning path if they choose it, so ideas must be genuinely buildable as a self-directed learning project — not a vague concept and not a full commercial product.
+
+Learner profile:
+${profileContext ?? "No profile available — suggest a broadly appealing, popular mix spanning different skill levels and domains."}
+${existingText}
+
+Generate exactly 10 diverse, exciting project ideas tailored to this learner. Requirements:
+- Calibrate difficulty to their stated experience in each area — not trivial if they're experienced, not overwhelming if they're a beginner.
+- Cover a MIX of their stated interests when they have a profile, plus 1–2 stretch/adjacent ideas that broaden their horizons into something adjacent but new.
+- If there's no profile, spread the 10 across different domains and difficulty levels so there's something for everyone.
+- title: punchy and concrete, max 6 words, no generic buzzwords ("Awesome", "Ultimate").
+- description: exactly 1–2 sentences, concrete about what they'll actually build, written in a motivating/exciting tone that sells why it's worth building.
+- category: pick the single best-fit tag from this exact list (lowercase, exact spelling): ${RECOMMENDATION_CATEGORIES.join(", ")}.
+
+Respond ONLY with valid JSON, no markdown:
+{"recommendations": [{"title": "...", "description": "...", "category": "..."}, ...]} — exactly 10 items.${langInstruction}`;
+
+  const response = await openrouter.chat.completions.create({
+    model: MODEL,
+    max_tokens: 2048,
+    messages: [{ role: "user", content: prompt }],
+    response_format: { type: "json_object" },
+  });
+
+  const content = response.choices[0]?.message?.content;
+  if (!content) throw new Error("Empty AI response");
+
+  const parsed = JSON.parse(content) as ProjectRecommendationsResponse;
+  if (!parsed.recommendations || !Array.isArray(parsed.recommendations)) {
+    throw new Error("Invalid recommendations response");
+  }
+
+  const categorySet = new Set<string>(RECOMMENDATION_CATEGORIES);
+  const recommendations = parsed.recommendations
+    .filter((r) => r && typeof r.title === "string" && typeof r.description === "string" && r.title.trim() && r.description.trim())
+    .map((r) => ({
+      title: r.title.trim(),
+      description: r.description.trim(),
+      category: categorySet.has(r.category) ? r.category : ("theory" as ProjectType),
+    }))
+    .slice(0, 10);
+
+  if (recommendations.length === 0) throw new Error("AI returned no usable recommendations");
+  return { recommendations };
+}
+
 export async function generateNodeMap(
   project: { title: string; ideaPrompt: string },
   profile: LearnerProfile | null
@@ -250,8 +330,7 @@ export async function generateNodeMap(
         profile.age ? `Age: ${profile.age}` : null,
         profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
         profile.major ? `Field/Major: ${profile.major}` : null,
-        profile.interests ? `Interests: ${profile.interests}` : null,
-        profile.experience ? `Experience: ${profile.experience}` : null,
+        profile.profileSummary ? profile.profileSummary : null,
         profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
       ]
         .filter(Boolean)
@@ -284,6 +363,9 @@ Rules for the node map:
 - Do not confuse validation/checkpoint tasks with starting tasks. Environment, Docker, deployment, benchmark, or acceptance-test validation should appear only after the artifacts being validated have been designed or built, unless the learner explicitly asks to validate an existing system first.
 - For rebuild, migration, audit, or "recreate from existing project" requests, the first nodes should inspect source documentation/code and extract architecture/contracts before implementation or infrastructure validation.
 - If a description corrects a prior map ordering (for example "Docker validation is not the first step"), honor that correction in node prerequisites and node ordering.
+- If the project depends on a foundational choice that shapes every later step — a language/framework, an environment (local vs cloud, OS, cross-platform toolchain), a specific tool/platform version, a dataset — and the description doesn't already pin it down, resolve that choice as its own early node before any node that assumes a particular answer. Never let the learner discover a tooling/environment mismatch mid-implementation of a later node.
+- Before any node whose instructions assume a specific capability is available (compute/memory/storage capacity, account tier, API scope, hardware resource, dataset size), include a node that confirms the learner's actual setup meets that requirement. A capability mismatch should surface as an early checkpoint, never for the first time as a failure during implementation.
+- When a project involves non-trivial environment or tooling setup (cross-compilation, cloud accounts, lab environments, cross-platform builds, connector/API onboarding, GPU/cloud provisioning), give environment setup and verification its own dedicated node(s), separate from nodes that write or configure actual project logic — don't let environment debugging consume a code/logic node's scope.
 
 ${projectTypeRules}
 ${langInstruction}

@@ -11,4 +11,6 @@ if (!apiKey) {
 export const openrouter = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
   apiKey,
+  timeout: 120_000,
+  maxRetries: 2,
 });

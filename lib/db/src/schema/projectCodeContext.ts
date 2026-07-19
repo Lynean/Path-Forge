@@ -1,4 +1,5 @@
 import { pgTable, serial, integer, jsonb, timestamp } from "drizzle-orm/pg-core";
+import { projectsTable } from "./projects";
 
 export interface CodeFile {
   filename: string;
@@ -13,7 +14,7 @@ export interface CodeFile {
 
 export const projectCodeContextTable = pgTable("project_code_context", {
   id: serial("id").primaryKey(),
-  projectId: integer("project_id").notNull().unique(),
+  projectId: integer("project_id").notNull().unique().references(() => projectsTable.id, { onDelete: "cascade" }),
   files: jsonb("files").$type<CodeFile[]>().notNull().$default(() => []),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "string" })
     .notNull()
