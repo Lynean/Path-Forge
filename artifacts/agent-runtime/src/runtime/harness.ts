@@ -201,6 +201,7 @@ export class AgentHarness implements AgentRuntime {
     const toolCalls: string[] = [];
     const executedCallSignatures = new Set<string>();
     const warnedDuplicateSignatures = new Set<string>();
+    let toolStateRevision = 0;
     let requestedToolCalls = 0;
     let resourcesFinished = false;
     const finishResources = async (): Promise<void> => {
@@ -301,7 +302,7 @@ export class AgentHarness implements AgentRuntime {
           );
         }
 
-        const callSignature = `${tool.name}:${canonicalize(parsedArguments.data)}`;
+        const callSignature = `${toolStateRevision}:${tool.name}:${canonicalize(parsedArguments.data)}`;
         if (executedCallSignatures.has(callSignature)) {
           const message = `The exact tool call ${tool.name}(${canonicalize(parsedArguments.data)}) already ran. Use its existing result or request different arguments.`;
           if (warnedDuplicateSignatures.has(callSignature)) {
@@ -355,6 +356,9 @@ export class AgentHarness implements AgentRuntime {
           arguments: parsedArguments.data,
           output,
         });
+        if (tool.invalidatesPriorToolResults?.(output)) {
+          toolStateRevision += 1;
+        }
         yield { type: "tool_completed", tool: tool.name, output };
       }
 

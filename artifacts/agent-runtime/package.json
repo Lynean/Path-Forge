@@ -9,6 +9,7 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "eval": "tsx ./src/evals/run-suite.ts",
+    "eval:repair": "tsx ./src/evals/run-repair-loop-suite.ts",
     "eval:docker": "tsx ./src/evals/run-docker-suite.ts",
     "eval:docker:python": "tsx ./src/evals/run-python-docker-suite.ts"
   },

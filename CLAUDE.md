@@ -113,3 +113,28 @@ OPENROUTER_API_KEY=sk-or-v1-...
 ## Deployment
 
 Deployed on Render (`render.yaml`). Build: `pnpm install --frozen-lockfile && pnpm --filter @workspace/api-server run build`. Start: `node --enable-source-maps ./artifacts/api-server/dist/index.mjs`. CORS auto-allows Vercel and Replit domains; others via `ALLOWED_ORIGINS`.
+
+## BuildWeek coding-agent checkpoint
+
+Before changing the coding-agent or beginning app integration, read:
+
+1. `CLAUDE_HANDOFF.md` for the verified implementation state and known limitations.
+2. `CODING_AGENT_PROCESS.md` for the packaged runtime workflow and integration boundary.
+3. `AGENT_PLAN.md` for the longer-term architecture and rollout plan.
+4. `AGENTS.md` for any additional repository-agent instructions.
+
+The verified lab lives in `artifacts/agent-runtime/` and
+`artifacts/agent-desktop/`. Preserve unrelated changes and do not write staged
+agent edits into a real workspace until an explicit accept/discard flow exists.
+
+The next phase is app integration, not a rewrite of the lab. Introduce an adapter
+between PathForge's API/SSE contracts and `AgentRuntime`, with the legacy AI flow
+available as a fallback.
+
+```bash
+# Deterministic checkpoint
+pnpm run agent:verify
+
+# Docker Desktop and local images required
+pnpm run agent:verify:docker
+```

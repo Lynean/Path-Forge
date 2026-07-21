@@ -10,6 +10,8 @@ export interface AgentTool {
     arguments_: Record<string, unknown>,
     context: AgentToolContext,
   ): AsyncIterable<AgentToolStreamEvent>;
+  /** Advances tool-history revision when this result changes later tool evidence. */
+  invalidatesPriorToolResults?(output: unknown): boolean;
   finishRun?(runId: string): Promise<void>;
 }
 
