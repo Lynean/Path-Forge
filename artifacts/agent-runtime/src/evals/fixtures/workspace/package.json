@@ -1,0 +1,5 @@
+{
+  "name": "weather-cli",
+  "private": true,
+  "type": "module"
+}

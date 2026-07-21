@@ -1,0 +1,9 @@
+{
+  "name": "docker-sandbox-fixture",
+  "private": true,
+  "scripts": {
+    "test": "node test.mjs",
+    "typecheck": "node -e \"console.log('Types passed inside Docker')\"",
+    "build": "node -e \"require('node:fs').writeFileSync('sandbox-created.txt', 'created only in Docker')\""
+  }
+}

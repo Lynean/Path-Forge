@@ -1,0 +1,22 @@
+{
+  "name": "@workspace/agent-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "eval": "tsx ./src/evals/run-suite.ts",
+    "eval:docker": "tsx ./src/evals/run-docker-suite.ts",
+    "eval:docker:python": "tsx ./src/evals/run-python-docker-suite.ts"
+  },
+  "dependencies": {
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
+  }
+}

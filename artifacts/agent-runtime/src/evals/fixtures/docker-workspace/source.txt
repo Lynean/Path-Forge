@@ -1,0 +1,1 @@
+This file began on the host and was copied into the disposable sandbox.

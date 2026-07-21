@@ -1,0 +1,13 @@
+{
+  "name": "docker-typescript-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "postinstall": "node -e \"require('node:fs').writeFileSync('POSTINSTALL_RAN', 'unsafe lifecycle script ran')\"",
+    "test": "node -e \"setTimeout(() => {}, 60000)\"",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}
