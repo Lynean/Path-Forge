@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NodeMapCanvas } from "@/components/node-map-canvas";
 import { NodeStepLightbox } from "@/components/node-step-lightbox";
+import { WorkspaceConnector } from "@/components/workspace-connector";
 import { Sparkles, RefreshCw, AlertCircle, ArrowLeft, PenLine, Loader2, FileText } from "lucide-react";
 
 export default function ProjectDetail() {
@@ -221,6 +222,7 @@ export default function ProjectDetail() {
           </div>
 
           <div className="flex items-center gap-2 shrink-0">
+            <WorkspaceConnector projectId={projectId} />
             {stats && hasMap && (
               <div className="text-right hidden sm:block">
                 <div className="text-lg font-mono font-bold" data-testid="progress-percent">
