@@ -36,6 +36,8 @@ import type {
   ProjectRecommendationsResponse,
   ProjectStats,
   ProjectUpdate,
+  ProjectWorkspace,
+  ProjectWorkspaceInput,
   RevisePlanInput,
   SpawnNodeInput,
   StepDetailInput,
@@ -1857,4 +1859,152 @@ export function useGetAgentRun<TData = Awaited<ReturnType<typeof getAgentRun>>, 
 
 
 
+
+export const getGetProjectWorkspaceUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/workspace`
+}
+
+/**
+ * @summary Get the local project folder attached to a project (desktop)
+ */
+export const getProjectWorkspace = async (projectId: number, options?: RequestInit): Promise<ProjectWorkspace> => {
+
+  return customFetch<ProjectWorkspace>(getGetProjectWorkspaceUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectWorkspaceQueryKey = (projectId: number,) => {
+    return [
+    `/api/projects/${projectId}/workspace`
+    ] as const;
+    }
+
+
+export const getGetProjectWorkspaceQueryOptions = <TData = Awaited<ReturnType<typeof getProjectWorkspace>>, TError = ErrorType<ErrorResponse>>(projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectWorkspace>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectWorkspaceQueryKey(projectId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectWorkspace>>> = ({ signal }) => getProjectWorkspace(projectId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: projectId !== null && projectId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectWorkspace>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectWorkspaceQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectWorkspace>>>
+export type GetProjectWorkspaceQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get the local project folder attached to a project (desktop)
+ */
+
+export function useGetProjectWorkspace<TData = Awaited<ReturnType<typeof getProjectWorkspace>>, TError = ErrorType<ErrorResponse>>(
+ projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectWorkspace>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectWorkspaceQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetProjectWorkspaceUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/workspace`
+}
+
+/**
+ * @summary Attach a local project folder to a project (desktop)
+ */
+export const setProjectWorkspace = async (projectId: number,
+    projectWorkspaceInput: ProjectWorkspaceInput, options?: RequestInit): Promise<ProjectWorkspace> => {
+
+  return customFetch<ProjectWorkspace>(getSetProjectWorkspaceUrl(projectId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(projectWorkspaceInput)
+  }
+);}
+
+
+
+
+export const getSetProjectWorkspaceMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProjectWorkspace>>, TError,{projectId: number;data: BodyType<ProjectWorkspaceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setProjectWorkspace>>, TError,{projectId: number;data: BodyType<ProjectWorkspaceInput>}, TContext> => {
+
+const mutationKey = ['setProjectWorkspace'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setProjectWorkspace>>, {projectId: number;data: BodyType<ProjectWorkspaceInput>}> = (props) => {
+          const {projectId,data} = props ?? {};
+
+          return  setProjectWorkspace(projectId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetProjectWorkspaceMutationResult = NonNullable<Awaited<ReturnType<typeof setProjectWorkspace>>>
+    export type SetProjectWorkspaceMutationBody = BodyType<ProjectWorkspaceInput>
+    export type SetProjectWorkspaceMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Attach a local project folder to a project (desktop)
+ */
+export const useSetProjectWorkspace = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProjectWorkspace>>, TError,{projectId: number;data: BodyType<ProjectWorkspaceInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setProjectWorkspace>>,
+        TError,
+        {projectId: number;data: BodyType<ProjectWorkspaceInput>},
+        TContext
+      > => {
+      return useMutation(getSetProjectWorkspaceMutationOptions(options));
+    }
 

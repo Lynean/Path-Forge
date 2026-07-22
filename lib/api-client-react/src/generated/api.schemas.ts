@@ -266,6 +266,18 @@ export interface AgentRunDetail {
   events: AgentRunEventItem[];
 }
 
+export interface ProjectWorkspace {
+  id: number;
+  projectId: number;
+  path: string;
+  updatedAt: string;
+}
+
+export interface ProjectWorkspaceInput {
+  /** @minLength 1 */
+  path: string;
+}
+
 export type ListAgentRunsParams = {
 limit?: number;
 };

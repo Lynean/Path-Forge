@@ -34,6 +34,8 @@ export * from './projectStats';
 export * from './projectStatus';
 export * from './projectUpdate';
 export * from './projectUpdateStatus';
+export * from './projectWorkspace';
+export * from './projectWorkspaceInput';
 export * from './revisePlanInput';
 export * from './spawnNodeInput';
 export * from './stepDetailInput';

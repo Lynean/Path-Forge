@@ -8,3 +8,4 @@ export * from "./messages";
 export * from "./projectCodeContext";
 export * from "./learnerRecommendations";
 export * from "./agentRuns";
+export * from "./projectWorkspaces";

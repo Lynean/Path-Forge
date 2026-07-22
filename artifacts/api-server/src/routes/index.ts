@@ -4,6 +4,7 @@ import profileRouter from "./profile";
 import projectsRouter from "./projects";
 import nodeMapRouter from "./nodeMap";
 import agentRunsRouter from "./agentRuns";
+import projectWorkspaceRouter from "./projectWorkspace";
 
 const router: IRouter = Router();
 
@@ -12,5 +13,6 @@ router.use(profileRouter);
 router.use(nodeMapRouter);
 router.use(projectsRouter);
 router.use(agentRunsRouter);
+router.use(projectWorkspaceRouter);
 
 export default router;

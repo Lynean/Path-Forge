@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, inArray } from "drizzle-orm";
-import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, chatSessionsTable, learnerProfilesTable, projectCodeContextTable } from "@workspace/db";
+import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, chatSessionsTable, learnerProfilesTable, projectCodeContextTable, projectWorkspacesTable } from "@workspace/db";
 import type { CodeFile, Node as DbNode, NodeEdge } from "@workspace/db";
 
 // A `db.transaction()` callback's `tx` param — accepted alongside `db` by helpers below
@@ -849,10 +849,14 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
     //   - AGENT_RUNTIME set     → the same flow through the AgentRuntime seam.
     // Both produce identical SSE `chunk` bytes; DB mutations below are shared.
     if (process.env.AGENT_RUNTIME) {
+      const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
+        .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
+
       const runtime = createAgentRuntime({
         loadContext: async () => ({
           node, project, profile: profile ?? null, history,
           mapCtx: { allNodes, allEdges }, recentConcerns, codeFiles, completedStepIndices,
+          workspaceRoot: attachedWorkspace?.path ?? null,
         }),
         recorder: new DbRunRecorder({
           clerkUserId: userId,

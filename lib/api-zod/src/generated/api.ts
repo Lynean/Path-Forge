@@ -513,3 +513,40 @@ export const GetAgentRunResponse = zod.object({
 })
 
 
+/**
+ * @summary Get the local project folder attached to a project (desktop)
+ */
+export const GetProjectWorkspaceParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const GetProjectWorkspaceResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "path": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Attach a local project folder to a project (desktop)
+ */
+export const SetProjectWorkspaceParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+
+
+
+export const SetProjectWorkspaceBody = zod.object({
+  "path": zod.string().min(1)
+})
+
+export const SetProjectWorkspaceResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "path": zod.string(),
+  "updatedAt": zod.string()
+})
+
+
