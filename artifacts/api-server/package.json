@@ -11,11 +11,13 @@
     "agent:verify-adapter": "tsx src/lib/agent/verify-legacy-adapter.ts",
     "agent:verify-harness": "tsx src/lib/agent/verify-harness-runtime.ts",
     "agent:verify-domain-tools": "tsx src/lib/agent/verify-domain-tools.ts",
-    "agent:verify-persistence": "tsx src/lib/agent/verify-persistence.ts"
+    "agent:verify-persistence": "tsx src/lib/agent/verify-persistence.ts",
+    "agent:verify-local-db": "tsx src/lib/agent/verify-local-db.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.31",
     "@clerk/shared": "^4.21.0",
+    "@electric-sql/pglite": "^0.5.4",
     "@workspace/agent-runtime": "workspace:*",
     "@workspace/api-zod": "workspace:*",
     "@workspace/db": "workspace:*",

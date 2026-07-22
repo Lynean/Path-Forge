@@ -225,6 +225,9 @@ importers:
       '@clerk/shared':
         specifier: ^4.21.0
         version: 4.21.0(react-dom@19.1.0(react@19.1.0))(react@19.1.0)
+      '@electric-sql/pglite':
+        specifier: ^0.5.4
+        version: 0.5.4
       '@workspace/agent-runtime':
         specifier: workspace:*
         version: link:../agent-runtime
@@ -245,7 +248,7 @@ importers:
         version: 2.8.6
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
+        version: 0.45.2(@electric-sql/pglite@0.5.4)(@types/pg@8.20.0)(pg@8.22.0)
       express:
         specifier: ^5.2.1
         version: 5.2.1(supports-color@5.5.0)
@@ -722,12 +725,15 @@ importers:
 
   lib/db:
     dependencies:
+      '@electric-sql/pglite':
+        specifier: ^0.5.4
+        version: 0.5.4
       drizzle-orm:
         specifier: 'catalog:'
-        version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
+        version: 0.45.2(@electric-sql/pglite@0.5.4)(@types/pg@8.20.0)(pg@8.22.0)
       drizzle-zod:
         specifier: ^0.8.3
-        version: 0.8.3(drizzle-orm@0.45.2(@types/pg@8.20.0)(pg@8.22.0))(zod@3.25.76)
+        version: 0.8.3(drizzle-orm@0.45.2(@electric-sql/pglite@0.5.4)(@types/pg@8.20.0)(pg@8.22.0))(zod@3.25.76)
       pg:
         specifier: ^8.22.0
         version: 8.22.0
@@ -914,6 +920,9 @@ packages:
 
   '@drizzle-team/brocli@0.10.2':
     resolution: {integrity: sha512-z33Il7l5dKjUgGULTqBsQBQwckHh5AbIuxhdsIxDDiZAzBOrZO6q9ogcWC65kU382AfynTfgNumVcNIjuIua6w==}
+
+  '@electric-sql/pglite@0.5.4':
+    resolution: {integrity: sha512-yYZUyyXrHU7tPlCjwZQJ6hIG9DscdCCn7Uk0mYKwC1FeHX286AbcmFveMiRBEak8e9iPupjsoVImN3yJZVed2g==}
 
   '@electron-internal/extract-zip@1.0.4':
     resolution: {integrity: sha512-Zr1Vs7E9tpCNhZHDAbFVXc2gEVCG9RqPDjrno5+bdgB6LRAuvgyMHJut4NCVyYwtAieapMzc3fiQ3CSTi75ARg==}
@@ -4159,6 +4168,8 @@ snapshots:
 
   '@drizzle-team/brocli@0.10.2': {}
 
+  '@electric-sql/pglite@0.5.4': {}
+
   '@electron-internal/extract-zip@1.0.4': {}
 
   '@electron/get@5.0.0(supports-color@5.5.0)':
@@ -5675,14 +5686,15 @@ snapshots:
       esbuild: 0.27.3
       tsx: 4.22.4
 
-  drizzle-orm@0.45.2(@types/pg@8.20.0)(pg@8.22.0):
+  drizzle-orm@0.45.2(@electric-sql/pglite@0.5.4)(@types/pg@8.20.0)(pg@8.22.0):
     optionalDependencies:
+      '@electric-sql/pglite': 0.5.4
       '@types/pg': 8.20.0
       pg: 8.22.0
 
-  drizzle-zod@0.8.3(drizzle-orm@0.45.2(@types/pg@8.20.0)(pg@8.22.0))(zod@3.25.76):
+  drizzle-zod@0.8.3(drizzle-orm@0.45.2(@electric-sql/pglite@0.5.4)(@types/pg@8.20.0)(pg@8.22.0))(zod@3.25.76):
     dependencies:
-      drizzle-orm: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
+      drizzle-orm: 0.45.2(@electric-sql/pglite@0.5.4)(@types/pg@8.20.0)(pg@8.22.0)
       zod: 3.25.76
 
   dunder-proto@1.0.1:
