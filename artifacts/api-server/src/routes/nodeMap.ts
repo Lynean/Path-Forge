@@ -844,15 +844,18 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
 
     let toolCalls: ChatToolCall[] = [];
 
-    // Same tutor-chat turn, two paths to the same (text stream + tool calls):
-    //   - AGENT_RUNTIME unset  → the original direct generator drive (unchanged).
-    //   - AGENT_RUNTIME set     → the same flow through the AgentRuntime seam.
-    // Both produce identical SSE `chunk` bytes; DB mutations below are shared.
-    if (process.env.AGENT_RUNTIME) {
-      const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
-        .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
+    const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
+      .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
 
+    // A project with a real local folder attached must use the harness runtime
+    // (the only one that reads folders + runs sandboxes). Otherwise honor the
+    // AGENT_RUNTIME flag; unset → the original direct legacy path (unchanged).
+    const runtimeKind = attachedWorkspace?.path ? "harness" : resolveAgentRuntimeKind();
+    const useSeam = Boolean(process.env.AGENT_RUNTIME) || Boolean(attachedWorkspace?.path);
+
+    if (useSeam) {
       const runtime = createAgentRuntime({
+        kind: runtimeKind,
         loadContext: async () => ({
           node, project, profile: profile ?? null, history,
           mapCtx: { allNodes, allEdges }, recentConcerns, codeFiles, completedStepIndices,
@@ -862,7 +865,7 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
           clerkUserId: userId,
           projectId: params.data.projectId,
           nodeId: node.id,
-          runtime: resolveAgentRuntimeKind(),
+          runtime: runtimeKind,
           userMessage: body.data.content,
         }),
         onRecorderError: (err, stage) => req.log.warn({ err, stage }, "agent run recording failed"),

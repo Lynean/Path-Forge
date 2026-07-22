@@ -26,6 +26,8 @@ export interface CreateAgentRuntimeDeps extends Pick<LegacyAgentRuntimeDeps, "lo
   recorder?: RunRecorder;
   /** Reports (swallowed) recording failures without breaking the chat stream. */
   onRecorderError?: (error: unknown, stage: string) => void;
+  /** Explicit runtime choice; overrides the AGENT_RUNTIME env resolution. */
+  kind?: AgentRuntimeKind;
 }
 
 /**
@@ -38,9 +40,10 @@ export function createAgentRuntime(
   deps: CreateAgentRuntimeDeps,
   env: NodeJS.ProcessEnv = process.env,
 ): AgentRuntime {
-  const { recorder, onRecorderError, ...runtimeDeps } = deps;
+  const { recorder, onRecorderError, kind, ...runtimeDeps } = deps;
+  const resolvedKind = kind ?? resolveAgentRuntimeKind(env);
   const inner: AgentRuntime =
-    resolveAgentRuntimeKind(env) === "harness"
+    resolvedKind === "harness"
       ? new HarnessAgentRuntime(runtimeDeps)
       : new LegacyAgentRuntime({ ...runtimeDeps, streamChat: streamNodeChatMessage });
   return recorder ? new PersistentAgentRuntime(inner, recorder, onRecorderError) : inner;
