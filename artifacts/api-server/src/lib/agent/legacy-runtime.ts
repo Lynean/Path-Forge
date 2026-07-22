@@ -31,6 +31,14 @@ export interface LegacyChatContext {
   recentConcerns: StreamChatParams[6];
   codeFiles: StreamChatParams[7];
   completedStepIndices: NonNullable<StreamChatParams[8]>;
+  /**
+   * Absolute path to the learner's real local project folder, when one is
+   * attached (fully-local desktop). When set and present on disk, the harness
+   * runtime operates on it directly (real files + Docker sandbox) instead of
+   * materializing DB code snippets into a temp workspace. Ignored by the legacy
+   * runtime.
+   */
+  workspaceRoot?: string | null;
 }
 
 export interface LegacyAgentRuntimeDeps {

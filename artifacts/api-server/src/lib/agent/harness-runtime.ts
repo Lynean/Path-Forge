@@ -1,21 +1,29 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
   AgentHarness,
+  AllowlistedCommandPolicy,
   ApplyPatchTool,
+  DockerSandbox,
+  ExactCommandPolicy,
   FileContextProvider,
   InspectProjectTool,
   ListFilesTool,
   OpenRouterModelAdapter,
   PreparePythonDependenciesTool,
   ReadFileTool,
+  RunCommandTool,
+  RuntimeDetector,
+  RuntimePolicy,
+  SandboxManager,
   SearchCodeTool,
   ToolRegistry,
   UnsupportedRunCommandTool,
   WorkspaceAccess,
   type AgentEvent,
   type AgentRuntime,
+  type AgentTool,
   type AgentTurnInput,
   type CompletionGateway,
   type CompletionRequest,
@@ -26,7 +34,71 @@ import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
 
 const MODEL = "google/gemini-3.1-flash-lite";
 const NO_SANDBOX_MESSAGE =
-  "Command execution is unavailable in the API server; the sandboxed workspace agent runs on dedicated infrastructure (a later phase).";
+  "No local project folder is attached to this lesson, so there is nothing to run. Attach a folder to enable running code.";
+
+async function pathIsDirectory(path: string | null | undefined): Promise<boolean> {
+  if (!path) return false;
+  try {
+    return (await stat(path)).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Builds the command tool for a real local workspace: detect the runtime, and
+ * if supported and Docker is ready, run approved commands in an isolated Docker
+ * sandbox. Any problem (unsupported project, Docker not running, missing images)
+ * degrades gracefully to an explanatory no-op tool so the agent can still read
+ * and reason about the project.
+ */
+async function buildCommandTool(
+  workspaceRoot: string,
+  workspace: WorkspaceAccess,
+): Promise<{ commandTool: AgentTool; sandboxes?: SandboxManager }> {
+  try {
+    const detection = await new RuntimeDetector({
+      workspaceEdits: workspace.stagedEdits(),
+    }).detect(workspaceRoot);
+    if (detection.status !== "supported") {
+      return { commandTool: new UnsupportedRunCommandTool(detection.message) };
+    }
+    const decision = new RuntimePolicy().evaluate(detection.plan);
+    if (!decision.allowed) {
+      return { commandTool: new UnsupportedRunCommandTool(decision.reason) };
+    }
+    const docker = new DockerSandbox({
+      runtimePlan: decision.approvedPlan,
+      dependencyCacheMetadataPath: join(tmpdir(), "pathforge-agent", "dependency-cache-usage.json"),
+    });
+    const dockerStatus = await docker.preflight();
+    if (!dockerStatus.ready) {
+      return { commandTool: new UnsupportedRunCommandTool(dockerStatus.message) };
+    }
+    const sandboxes = new SandboxManager(docker, workspaceRoot, () => workspace.stagedEdits());
+    const commandPlan = decision.approvedPlan.plan.commands;
+    const policy =
+      commandPlan.kind === "package-scripts"
+        ? new AllowlistedCommandPolicy({
+            packageManagers: [...commandPlan.packageManagers],
+            scripts: [...commandPlan.scripts],
+          })
+        : new ExactCommandPolicy({
+            commands: commandPlan.recipes.map((recipe) => ({
+              command: recipe.command,
+              arguments: [...recipe.arguments],
+            })),
+          });
+    const commandTool = new RunCommandTool({ policy, sandboxes, timeoutMs: 120_000 });
+    return { commandTool, sandboxes };
+  } catch (error) {
+    return {
+      commandTool: new UnsupportedRunCommandTool(
+        error instanceof Error ? error.message : "The sandbox is unavailable.",
+      ),
+    };
+  }
+}
 
 export interface HarnessAgentRuntimeDeps {
   /** Same context loader as the legacy runtime (DB reads in the route). */
@@ -198,11 +270,12 @@ async function materializeWorkspace(ctx: LegacyChatContext): Promise<string> {
 }
 
 /**
- * `AgentRuntime` backed by the lab's `AgentHarness`. Each turn materializes the
- * learner's code context into a disposable temp workspace so the harness's file
- * tools work, runs the harness (no Docker — command execution is stubbed), then
- * cleans up. Selected via `AGENT_RUNTIME=harness`; the legacy runtime remains
- * the default fallback.
+ * `AgentRuntime` backed by the lab's `AgentHarness`. When the lesson has a real
+ * local project folder attached (`ctx.workspaceRoot`), the harness operates on
+ * it directly — real files plus an isolated Docker sandbox for running commands
+ * (with graceful fallback when Docker is unavailable). Otherwise it falls back
+ * to materializing the DB code snippets into a disposable temp workspace with no
+ * command execution. Selected via `AGENT_RUNTIME=harness`.
  */
 export class HarnessAgentRuntime implements AgentRuntime {
   private readonly active = new Map<string, AgentHarness>();
@@ -211,12 +284,19 @@ export class HarnessAgentRuntime implements AgentRuntime {
 
   async *runTurn(input: AgentTurnInput): AsyncGenerator<AgentEvent> {
     const ctx = await this.deps.loadContext(input);
+    const useRealFolder = await pathIsDirectory(ctx.workspaceRoot);
+
     const [agentHome, workspaceRoot, model] = await Promise.all([
       ensureAgentHome(),
-      materializeWorkspace(ctx),
+      useRealFolder ? Promise.resolve(ctx.workspaceRoot as string) : materializeWorkspace(ctx),
       (this.deps.createModel ?? defaultCreateModel)(),
     ]);
     const workspace = new WorkspaceAccess(workspaceRoot);
+
+    const { commandTool, sandboxes } = useRealFolder
+      ? await buildCommandTool(workspaceRoot, workspace)
+      : { commandTool: new UnsupportedRunCommandTool(NO_SANDBOX_MESSAGE), sandboxes: undefined };
+
     const harness = new AgentHarness({
       model,
       context: new FileContextProvider({ agentHome, workspaceRoot }),
@@ -225,9 +305,9 @@ export class HarnessAgentRuntime implements AgentRuntime {
         new ListFilesTool(workspace),
         new ReadFileTool(workspace),
         new SearchCodeTool(workspace),
-        new ApplyPatchTool(workspace, undefined),
-        new PreparePythonDependenciesTool({ workspace, sandboxes: undefined }),
-        new UnsupportedRunCommandTool(NO_SANDBOX_MESSAGE),
+        new ApplyPatchTool(workspace, sandboxes),
+        new PreparePythonDependenciesTool({ workspace, sandboxes }),
+        commandTool,
         // PathForge learning-plan proposals (update steps, spawn nodes, …). The
         // harness only proposes; the chat route applies them to Postgres.
         ...createPathforgePlanTools(),
@@ -240,7 +320,11 @@ export class HarnessAgentRuntime implements AgentRuntime {
       yield* harness.runTurn(input);
     } finally {
       this.active.delete(input.runId);
-      await rm(workspaceRoot, { recursive: true, force: true }).catch(() => {});
+      // Only the disposable materialized workspace is removed; a real local
+      // project folder is never touched.
+      if (!useRealFolder) {
+        await rm(workspaceRoot, { recursive: true, force: true }).catch(() => {});
+      }
     }
   }
 

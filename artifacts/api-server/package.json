@@ -12,7 +12,8 @@
     "agent:verify-harness": "tsx src/lib/agent/verify-harness-runtime.ts",
     "agent:verify-domain-tools": "tsx src/lib/agent/verify-domain-tools.ts",
     "agent:verify-persistence": "tsx src/lib/agent/verify-persistence.ts",
-    "agent:verify-local-db": "tsx src/lib/agent/verify-local-db.ts"
+    "agent:verify-local-db": "tsx src/lib/agent/verify-local-db.ts",
+    "agent:verify-real-folder": "tsx src/lib/agent/verify-real-folder.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.31",
