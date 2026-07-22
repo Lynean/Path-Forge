@@ -1,5 +1,7 @@
+import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
 import { basename, join } from "node:path";
 import {
   AgentHarness,
@@ -45,6 +47,7 @@ import {
 import { ConversationStore } from "./conversation-store";
 
 let mainWindow: BrowserWindow | null = null;
+let backendProcess: ChildProcess | null = null;
 let selectedWorkspace: WorkspaceSelection | null = null;
 const activeHarnesses = new Map<string, { harness: AgentHarness; runId: string }>();
 const stagedWorkspaces = new Map<string, WorkspaceAccess>();
@@ -654,7 +657,81 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(() => {
+function pathforgeBackendPort(): number {
+  return Number(process.env["PATHFORGE_BACKEND_PORT"]?.trim() || "5000");
+}
+
+/** Resolves once the backend answers on its port (any HTTP response = ready). */
+async function waitForBackend(port: number, timeoutMs = 30_000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const ready = await new Promise<boolean>((resolve) => {
+      const req = httpRequest(
+        { host: "127.0.0.1", port, path: "/api/agent-runs", method: "GET", timeout: 2_000 },
+        (res) => {
+          res.resume();
+          resolve(true);
+        },
+      );
+      req.on("error", () => resolve(false));
+      req.on("timeout", () => {
+        req.destroy();
+        resolve(false);
+      });
+      req.end();
+    });
+    if (ready) return;
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+  throw new Error(`PathForge backend did not become ready on port ${port}`);
+}
+
+/**
+ * Starts the bundled PathForge API server as a managed child process in
+ * fully-local mode (embedded DB in the app's data dir, no Clerk). The Electron
+ * binary runs it as plain Node (ELECTRON_RUN_AS_NODE), so no separate Node
+ * install is required. Paths default to the monorepo dev layout and are
+ * overridable for packaged builds.
+ */
+async function startPathforgeBackend(): Promise<void> {
+  if (backendProcess) return;
+  const port = pathforgeBackendPort();
+  const backendEntry =
+    process.env["PATHFORGE_BACKEND_ENTRY"]?.trim() ||
+    join(__dirname, "..", "..", "api-server", "dist", "index.mjs");
+  const migrationsDir =
+    process.env["PATHFORGE_MIGRATIONS_DIR"]?.trim() ||
+    join(__dirname, "..", "..", "..", "lib", "db", "drizzle");
+  const localDb =
+    process.env["PATHFORGE_LOCAL_DB"]?.trim() || join(app.getPath("userData"), "pathforge-db");
+  const apiKey = await resolveOpenRouterApiKey();
+
+  backendProcess = spawn(process.execPath, [backendEntry], {
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      PORT: String(port),
+      PATHFORGE_LOCAL_MODE: "1",
+      PATHFORGE_LOCAL_DB: localDb,
+      PATHFORGE_MIGRATIONS_DIR: migrationsDir,
+      ...(apiKey ? { OPENROUTER_API_KEY: apiKey } : {}),
+    },
+    stdio: "inherit",
+  });
+  backendProcess.on("exit", () => {
+    backendProcess = null;
+  });
+  await waitForBackend(port);
+}
+
+function stopPathforgeBackend(): void {
+  if (backendProcess) {
+    backendProcess.kill();
+    backendProcess = null;
+  }
+}
+
+app.whenReady().then(async () => {
   ipcMain.handle("agent-desktop:select-workspace", selectWorkspace);
   ipcMain.handle("agent-desktop:get-runtime-status", getRuntimeStatus);
   ipcMain.handle("agent-desktop:get-conversation", getConversation);
@@ -662,12 +739,25 @@ app.whenReady().then(() => {
   ipcMain.handle("agent-desktop:clear-dependency-cache", clearDependencyCache);
   ipcMain.handle("agent-desktop:run-turn", runTurn);
   ipcMain.handle("agent-desktop:cancel-run", cancelRun);
+
+  // When hosting the PathForge UI, run its backend in-process so the user only
+  // launches one app. (The bundled lab renderer path spawns nothing.)
+  if (process.env["PATHFORGE_APP_URL"]?.trim()) {
+    try {
+      await startPathforgeBackend();
+    } catch (error) {
+      console.error("Failed to start the PathForge backend:", error);
+    }
+  }
+
   createWindow();
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
 });
+
+app.on("will-quit", stopPathforgeBackend);
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
