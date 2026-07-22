@@ -33,7 +33,8 @@ import { randomUUID } from "node:crypto";
 import { requireAuth, getAuthUserId } from "../lib/auth";
 import { generateNodeMap } from "../lib/aiNodeMap";
 import { streamVisualization } from "../lib/aiVisualize";
-import { createAgentRuntime } from "../lib/agent";
+import { createAgentRuntime, resolveAgentRuntimeKind } from "../lib/agent";
+import { DbRunRecorder } from "../lib/agent/db-run-recorder";
 import {
   streamNodeChatMessage,
   streamOpeningMessage,
@@ -853,6 +854,14 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
           node, project, profile: profile ?? null, history,
           mapCtx: { allNodes, allEdges }, recentConcerns, codeFiles, completedStepIndices,
         }),
+        recorder: new DbRunRecorder({
+          clerkUserId: userId,
+          projectId: params.data.projectId,
+          nodeId: node.id,
+          runtime: resolveAgentRuntimeKind(),
+          userMessage: body.data.content,
+        }),
+        onRecorderError: (err, stage) => req.log.warn({ err, stage }, "agent run recording failed"),
       });
       for await (const event of runtime.runTurn({
         runId: randomUUID(),
