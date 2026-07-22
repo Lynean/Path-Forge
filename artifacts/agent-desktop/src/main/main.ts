@@ -631,7 +631,17 @@ function createWindow(): void {
       }
     });
   }
-  void mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
+  // Desktop-host mode: when PATHFORGE_APP_URL is set (e.g. the PathForge web app
+  // at http://localhost:3000), host that UI in the shell so it gains local
+  // workspace + sandbox access via the exposed `agentDesktop` bridge. Otherwise
+  // load the bundled lab renderer (the verified default). The smoke-test flags
+  // above never set PATHFORGE_APP_URL, so those journeys are unaffected.
+  const pathforgeAppUrl = process.env["PATHFORGE_APP_URL"]?.trim();
+  if (pathforgeAppUrl) {
+    void mainWindow.loadURL(pathforgeAppUrl);
+  } else {
+    void mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
+  }
   let closingAfterCleanup = false;
   mainWindow.on("close", (event) => {
     if (activeHarnesses.size === 0 || closingAfterCleanup) return;
