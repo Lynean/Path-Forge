@@ -41,7 +41,11 @@ export const pool = poolInstance;
 
 export * from "./schema";
 
-const migrationsFolder = join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle");
+// Defaults to the dev-relative path; override with PATHFORGE_MIGRATIONS_DIR when
+// the code is bundled (e.g. the packaged desktop app) and the source layout is lost.
+const migrationsFolder =
+  process.env.PATHFORGE_MIGRATIONS_DIR?.trim() ||
+  join(dirname(fileURLToPath(import.meta.url)), "..", "drizzle");
 
 /** True when running against the embedded local database. */
 export const isLocalDatabase = Boolean(localClient);

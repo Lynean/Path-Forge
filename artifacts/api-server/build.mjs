@@ -29,6 +29,9 @@ async function buildAll() {
     // - use path traversal to read files (e.g. @google-cloud/secret-manager loads sibling .proto files)
     external: [
       "*.node",
+      // Ships WASM + a Postgres fs image (pglite.data) that can't be inlined;
+      // load it from node_modules at runtime instead of bundling.
+      "@electric-sql/pglite",
       "sharp",
       "better-sqlite3",
       "sqlite3",
