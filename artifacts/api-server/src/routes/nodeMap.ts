@@ -29,9 +29,11 @@ import {
   SpawnExtraNodeBody,
   SpawnExtraNodeResponse,
 } from "@workspace/api-zod";
+import { randomUUID } from "node:crypto";
 import { requireAuth, getAuthUserId } from "../lib/auth";
 import { generateNodeMap } from "../lib/aiNodeMap";
 import { streamVisualization } from "../lib/aiVisualize";
+import { createAgentRuntime } from "../lib/agent";
 import {
   streamNodeChatMessage,
   streamOpeningMessage,
@@ -839,17 +841,49 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
       ? (req.body.completedStepIndices as number[])
       : [];
 
-    const chatGen = streamNodeChatMessage(
-      node, project, profile ?? null, history, body.data.content, { allNodes, allEdges }, recentConcerns, codeFiles, completedStepIndices
-    );
     let toolCalls: ChatToolCall[] = [];
-    let step = await chatGen.next();
-    while (!step.done) {
-      fullContent += step.value;
-      res.write(`data: ${JSON.stringify({ type: "chunk", content: step.value })}\n\n`);
-      step = await chatGen.next();
+
+    // Same tutor-chat turn, two paths to the same (text stream + tool calls):
+    //   - AGENT_RUNTIME unset  → the original direct generator drive (unchanged).
+    //   - AGENT_RUNTIME set     → the same flow through the AgentRuntime seam.
+    // Both produce identical SSE `chunk` bytes; DB mutations below are shared.
+    if (process.env.AGENT_RUNTIME) {
+      const runtime = createAgentRuntime({
+        loadContext: async () => ({
+          node, project, profile: profile ?? null, history,
+          mapCtx: { allNodes, allEdges }, recentConcerns, codeFiles, completedStepIndices,
+        }),
+      });
+      for await (const event of runtime.runTurn({
+        runId: randomUUID(),
+        workspaceId: String(params.data.projectId),
+        preferredLanguage: null,
+        currentNode: { id: node.id, title: node.title, brief: node.brief ?? undefined },
+        messages: history.map((m) => ({ role: m.role, content: m.content })),
+        userMessage: body.data.content,
+      })) {
+        if (event.type === "text_delta") {
+          fullContent += event.content;
+          res.write(`data: ${JSON.stringify({ type: "chunk", content: event.content })}\n\n`);
+        } else if (event.type === "tool_completed") {
+          toolCalls.push({ name: event.tool as ChatToolCall["name"], args: event.output as Record<string, unknown> });
+        } else if (event.type === "failed") {
+          // Re-raise so the existing catch emits the identical error SSE and skips DB writes.
+          throw new Error(event.message);
+        }
+      }
+    } else {
+      const chatGen = streamNodeChatMessage(
+        node, project, profile ?? null, history, body.data.content, { allNodes, allEdges }, recentConcerns, codeFiles, completedStepIndices
+      );
+      let step = await chatGen.next();
+      while (!step.done) {
+        fullContent += step.value;
+        res.write(`data: ${JSON.stringify({ type: "chunk", content: step.value })}\n\n`);
+        step = await chatGen.next();
+      }
+      toolCalls = step.value;
     }
-    toolCalls = step.value;
 
     const displayContent = fullContent.trim() || synthesizeActionSummary(toolCalls);
     const userMsg: ChatMessage = { role: "user", content: body.data.content, createdAt: new Date().toISOString() };
