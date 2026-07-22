@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { useUser } from "@clerk/react";
+import { useOptionalUser } from "@/lib/useOptionalUser";
 import { useListProjects, useCreateProject, useDeleteProject, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -44,7 +44,7 @@ function buildEnrichedPrompt(
 
 export default function Projects() {
   const [, setLocation] = useLocation();
-  const { user } = useUser();
+  const { user } = useOptionalUser();
   const [open, setOpen] = useState(false);
   const [step, setStep] = useState<"form" | "loading" | "framing" | "refining">("form");
   const [title, setTitle] = useState("");
