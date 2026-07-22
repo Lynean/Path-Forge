@@ -16,6 +16,8 @@ tags:
     description: Project operations
   - name: nodemap
     description: Node map operations
+  - name: agentruns
+    description: Recorded agent-runtime run history
 
 paths:
   /healthz:
@@ -565,6 +567,52 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /agent-runs:
+    get:
+      operationId: listAgentRuns
+      tags: [agentruns]
+      summary: List the authenticated user's recorded agent runs (newest first)
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Recorded agent runs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AgentRunSummary"
+
+  /agent-runs/{runId}:
+    get:
+      operationId: getAgentRun
+      tags: [agentruns]
+      summary: Get one recorded agent run with its event timeline
+      parameters:
+        - name: runId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Agent run detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentRunDetail"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
 components:
   schemas:
     HealthStatus:
@@ -891,3 +939,80 @@ components:
       required:
         - stepIndex
         - stepTitle
+
+    AgentRunSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        runId:
+          type: string
+        clerkUserId:
+          type: string
+        projectId:
+          type: ["integer", "null"]
+        nodeId:
+          type: ["integer", "null"]
+        runtime:
+          type: string
+          description: Which runtime processed the turn (e.g. legacy or harness)
+        status:
+          type: string
+          description: running, completed, failed, cancelled, or interrupted
+        userMessage:
+          type: string
+        response:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+        completedAt:
+          type: ["string", "null"]
+      required:
+        - id
+        - runId
+        - clerkUserId
+        - projectId
+        - nodeId
+        - runtime
+        - status
+        - userMessage
+        - response
+        - createdAt
+        - completedAt
+
+    AgentRunEventItem:
+      type: object
+      properties:
+        id:
+          type: integer
+        runId:
+          type: string
+        seq:
+          type: integer
+        type:
+          type: string
+        payload:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+      required:
+        - id
+        - runId
+        - seq
+        - type
+        - payload
+        - createdAt
+
+    AgentRunDetail:
+      type: object
+      properties:
+        run:
+          $ref: "#/components/schemas/AgentRunSummary"
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/AgentRunEventItem"
+      required:
+        - run
+        - events

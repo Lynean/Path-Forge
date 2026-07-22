@@ -230,3 +230,43 @@ export interface StepDetailInput {
   stepBrief?: string;
 }
 
+export interface AgentRunSummary {
+  id: number;
+  runId: string;
+  clerkUserId: string;
+  /** @nullable */
+  projectId: number | null;
+  /** @nullable */
+  nodeId: number | null;
+  /** Which runtime processed the turn (e.g. legacy or harness) */
+  runtime: string;
+  /** running, completed, failed, cancelled, or interrupted */
+  status: string;
+  userMessage: string;
+  /** @nullable */
+  response: string | null;
+  createdAt: string;
+  /** @nullable */
+  completedAt: string | null;
+}
+
+export type AgentRunEventItemPayload = { [key: string]: unknown };
+
+export interface AgentRunEventItem {
+  id: number;
+  runId: string;
+  seq: number;
+  type: string;
+  payload: AgentRunEventItemPayload;
+  createdAt: string;
+}
+
+export interface AgentRunDetail {
+  run: AgentRunSummary;
+  events: AgentRunEventItem[];
+}
+
+export type ListAgentRunsParams = {
+limit?: number;
+};
+

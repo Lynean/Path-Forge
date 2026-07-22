@@ -458,3 +458,58 @@ export const UpdateNodeStatusResponse = zod.object({
 })
 
 
+/**
+ * @summary List the authenticated user's recorded agent runs (newest first)
+ */
+export const ListAgentRunsQueryParams = zod.object({
+  "limit": zod.coerce.number().optional()
+})
+
+export const ListAgentRunsResponseItem = zod.object({
+  "id": zod.number(),
+  "runId": zod.string(),
+  "clerkUserId": zod.string(),
+  "projectId": zod.number().nullable(),
+  "nodeId": zod.number().nullable(),
+  "runtime": zod.string().describe('Which runtime processed the turn (e.g. legacy or harness)'),
+  "status": zod.string().describe('running, completed, failed, cancelled, or interrupted'),
+  "userMessage": zod.string(),
+  "response": zod.string().nullable(),
+  "createdAt": zod.string(),
+  "completedAt": zod.string().nullable()
+})
+export const ListAgentRunsResponse = zod.array(ListAgentRunsResponseItem)
+
+
+/**
+ * @summary Get one recorded agent run with its event timeline
+ */
+export const GetAgentRunParams = zod.object({
+  "runId": zod.coerce.string()
+})
+
+export const GetAgentRunResponse = zod.object({
+  "run": zod.object({
+  "id": zod.number(),
+  "runId": zod.string(),
+  "clerkUserId": zod.string(),
+  "projectId": zod.number().nullable(),
+  "nodeId": zod.number().nullable(),
+  "runtime": zod.string().describe('Which runtime processed the turn (e.g. legacy or harness)'),
+  "status": zod.string().describe('running, completed, failed, cancelled, or interrupted'),
+  "userMessage": zod.string(),
+  "response": zod.string().nullable(),
+  "createdAt": zod.string(),
+  "completedAt": zod.string().nullable()
+}),
+  "events": zod.array(zod.object({
+  "id": zod.number(),
+  "runId": zod.string(),
+  "seq": zod.number(),
+  "type": zod.string(),
+  "payload": zod.record(zod.string(), zod.unknown()),
+  "createdAt": zod.string()
+}))
+})
+
+

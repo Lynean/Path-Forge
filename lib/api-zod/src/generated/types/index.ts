@@ -6,10 +6,15 @@
  * OpenAPI spec version: 0.1.0
  */
 
+export * from './agentRunDetail';
+export * from './agentRunEventItem';
+export * from './agentRunEventItemPayload';
+export * from './agentRunSummary';
 export * from './errorResponse';
 export * from './healthStatus';
 export * from './learnerProfile';
 export * from './learnerProfileInput';
+export * from './listAgentRunsParams';
 export * from './node';
 export * from './nodeChatHistory';
 export * from './nodeChatMessage';
