@@ -15,6 +15,8 @@ import Projects from "@/pages/projects";
 import ProjectDetail from "@/pages/project-detail";
 import Profile from "@/pages/profile";
 import { Layout } from "@/components/layout";
+import { LocalLayout } from "@/components/local-layout";
+import { isLocalMode } from "@/lib/localMode";
 import { useGetProfile } from "@workspace/api-client-react";
 
 const clerkPubKey = publishableKeyFromHost(
@@ -31,7 +33,7 @@ function stripBase(path: string): string {
     : path;
 }
 
-if (!clerkPubKey) {
+if (!isLocalMode && !clerkPubKey) {
   throw new Error("Missing VITE_CLERK_PUBLISHABLE_KEY in .env file");
 }
 
@@ -135,7 +137,13 @@ function HomeRedirect() {
   );
 }
 
-function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
+function ProtectedRoute({
+  component: Component,
+  layout: LayoutComponent = Layout,
+}: {
+  component: React.ComponentType;
+  layout?: React.ComponentType<{ children: React.ReactNode }>;
+}) {
   const { data: profile, isLoading, error } = useGetProfile();
   const [location] = useLocation();
 
@@ -149,9 +157,37 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
   }
 
   return (
-    <Layout>
+    <LayoutComponent>
       <Component />
-    </Layout>
+    </LayoutComponent>
+  );
+}
+
+/**
+ * Clerk-free route tree for fully-local desktop mode: no login, no ClerkProvider,
+ * every route renders directly as the single on-device user.
+ */
+function LocalRoutes() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Switch>
+        <Route path="/" component={() => <Redirect to="/projects" />} />
+        <Route path="/onboarding" component={Onboarding} />
+        <Route path="/projects">
+          <ProtectedRoute component={Projects} layout={LocalLayout} />
+        </Route>
+        <Route path="/projects/:projectId/nodes/:nodeId">
+          <ProtectedRoute component={ProjectDetail} layout={LocalLayout} />
+        </Route>
+        <Route path="/projects/:projectId">
+          <ProtectedRoute component={ProjectDetail} layout={LocalLayout} />
+        </Route>
+        <Route path="/profile">
+          <ProtectedRoute component={Profile} layout={LocalLayout} />
+        </Route>
+        <Route component={NotFound} />
+      </Switch>
+    </QueryClientProvider>
   );
 }
 
@@ -231,7 +267,7 @@ function App() {
   return (
     <TooltipProvider>
       <WouterRouter base={basePath}>
-        <ClerkProviderWithRoutes />
+        {isLocalMode ? <LocalRoutes /> : <ClerkProviderWithRoutes />}
       </WouterRouter>
       <Toaster />
     </TooltipProvider>
