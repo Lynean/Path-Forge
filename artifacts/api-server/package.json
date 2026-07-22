@@ -9,7 +9,8 @@
     "start": "cross-env PORT=5000 node --enable-source-maps --env-file=../../.env ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "agent:verify-adapter": "tsx src/lib/agent/verify-legacy-adapter.ts",
-    "agent:verify-harness": "tsx src/lib/agent/verify-harness-runtime.ts"
+    "agent:verify-harness": "tsx src/lib/agent/verify-harness-runtime.ts",
+    "agent:verify-domain-tools": "tsx src/lib/agent/verify-domain-tools.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.31",
@@ -24,7 +25,8 @@
     "express": "^5.2.1",
     "http-proxy-middleware": "^4.1.1",
     "pino": "^9.14.0",
-    "pino-http": "^10.5.0"
+    "pino-http": "^10.5.0",
+    "zod": "catalog:"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",

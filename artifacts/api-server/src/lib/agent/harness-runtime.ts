@@ -22,6 +22,7 @@ import {
   type ModelAdapter,
 } from "@workspace/agent-runtime";
 import type { LegacyChatContext } from "./legacy-runtime";
+import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
 
 const MODEL = "google/gemini-3.1-flash-lite";
 const NO_SANDBOX_MESSAGE =
@@ -227,6 +228,9 @@ export class HarnessAgentRuntime implements AgentRuntime {
         new ApplyPatchTool(workspace, undefined),
         new PreparePythonDependenciesTool({ workspace, sandboxes: undefined }),
         new UnsupportedRunCommandTool(NO_SANDBOX_MESSAGE),
+        // PathForge learning-plan proposals (update steps, spawn nodes, …). The
+        // harness only proposes; the chat route applies them to Postgres.
+        ...createPathforgePlanTools(),
       ]),
       budgets: { maxRunDurationMs: 300_000, maxToolDurationMs: 240_000 },
     });
