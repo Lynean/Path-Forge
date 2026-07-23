@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, inArray } from "drizzle-orm";
-import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, chatSessionsTable, learnerProfilesTable, projectCodeContextTable, projectWorkspacesTable } from "@workspace/db";
+import { db, projectsTable, nodeMapsTable, nodesTable, nodeEdgesTable, chatSessionsTable, learnerProfilesTable, projectCodeContextTable, projectWorkspacesTable, projectEnvironmentsTable } from "@workspace/db";
 import type { CodeFile, Node as DbNode, NodeEdge } from "@workspace/db";
 
 // A `db.transaction()` callback's `tx` param — accepted alongside `db` by helpers below
@@ -881,6 +881,8 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
 
     const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
       .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
+    const [approvedEnv] = await db.select().from(projectEnvironmentsTable)
+      .where(eq(projectEnvironmentsTable.projectId, params.data.projectId));
 
     // A project with a real local folder attached must use the harness runtime
     // (the only one that reads folders + runs sandboxes). Otherwise honor the
@@ -895,6 +897,14 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
           node, project, profile: profile ?? null, history,
           mapCtx: { allNodes, allEdges }, recentConcerns, codeFiles, completedStepIndices,
           workspaceRoot: attachedWorkspace?.path ?? null,
+          approvedEnvironment: approvedEnv
+            ? {
+                baseImage: approvedEnv.baseImage,
+                setupCommands: approvedEnv.setupCommands,
+                runCommand: approvedEnv.runCommand,
+                dockerfile: approvedEnv.dockerfile,
+              }
+            : null,
         }),
         recorder: new DbRunRecorder({
           clerkUserId: userId,

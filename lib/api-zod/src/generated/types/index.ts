@@ -26,6 +26,8 @@ export * from './nodeStatus';
 export * from './nodeStatusUpdate';
 export * from './nodeStatusUpdateStatus';
 export * from './project';
+export * from './projectEnvironment';
+export * from './projectEnvironmentInput';
 export * from './projectInput';
 export * from './projectRecommendation';
 export * from './projectRecommendationCategory';

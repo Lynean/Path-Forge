@@ -9,3 +9,4 @@ export * from "./projectCodeContext";
 export * from "./learnerRecommendations";
 export * from "./agentRuns";
 export * from "./projectWorkspaces";
+export * from "./projectEnvironments";

@@ -37,6 +37,7 @@ import type { LegacyChatContext } from "./legacy-runtime";
 import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
 import { RunPythonTool } from "./tools/run-python-tool";
 import { ProposeEnvironmentTool } from "./tools/propose-environment-tool";
+import { RunInEnvironmentTool } from "./tools/run-in-environment-tool";
 
 /** Supplies SOUL/USER/PROJECT context to the harness from in-memory strings. */
 class InlineContextProvider implements AgentContextProvider {
@@ -311,27 +312,34 @@ export class HarnessAgentRuntime implements AgentRuntime {
       ? await buildCommandTool(workspaceRoot, workspace)
       : { commandTool: new UnsupportedRunCommandTool(NO_SANDBOX_MESSAGE), sandboxes: undefined };
 
+    const harnessTools: AgentTool[] = [
+      new InspectProjectTool(workspace),
+      new ListFilesTool(workspace),
+      new ReadFileTool(workspace),
+      new SearchCodeTool(workspace),
+      new ApplyPatchTool(workspace, sandboxes),
+      new PreparePythonDependenciesTool({ workspace, sandboxes }),
+      commandTool,
+      // Zero-install Python execution (WASM) — available even without Docker,
+      // so the tutor can run/verify common Python regardless of the sandbox.
+      new RunPythonTool(workspace),
+      // Propose a Docker environment for project types the built-in sandboxes
+      // don't cover (recorded/shown only — nothing is built or run).
+      new ProposeEnvironmentTool(),
+      // PathForge learning-plan proposals (update steps, spawn nodes, …). The
+      // harness only proposes; the chat route applies them to Postgres.
+      ...createPathforgePlanTools(),
+    ];
+    // Once the learner has approved a custom environment, let the agent build
+    // and run the project in it.
+    if (useRealFolder && ctx.approvedEnvironment) {
+      harnessTools.push(new RunInEnvironmentTool(ctx.approvedEnvironment, workspaceRoot));
+    }
+
     const harness = new AgentHarness({
       model,
       context: new FileContextProvider({ agentHome, workspaceRoot }),
-      tools: new ToolRegistry([
-        new InspectProjectTool(workspace),
-        new ListFilesTool(workspace),
-        new ReadFileTool(workspace),
-        new SearchCodeTool(workspace),
-        new ApplyPatchTool(workspace, sandboxes),
-        new PreparePythonDependenciesTool({ workspace, sandboxes }),
-        commandTool,
-        // Zero-install Python execution (WASM) — available even without Docker,
-        // so the tutor can run/verify common Python regardless of the sandbox.
-        new RunPythonTool(workspace),
-        // Propose a Docker environment for project types the built-in sandboxes
-        // don't cover (recorded/shown only — nothing is built or run).
-        new ProposeEnvironmentTool(),
-        // PathForge learning-plan proposals (update steps, spawn nodes, …). The
-        // harness only proposes; the chat route applies them to Postgres.
-        ...createPathforgePlanTools(),
-      ]),
+      tools: new ToolRegistry(harnessTools),
       budgets: { maxRunDurationMs: 300_000, maxToolDurationMs: 240_000 },
     });
 

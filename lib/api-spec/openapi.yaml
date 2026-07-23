@@ -674,6 +674,67 @@ paths:
               schema:
                 $ref: "#/components/schemas/ProjectWorkspace"
 
+  /projects/{projectId}/environment:
+    get:
+      operationId: getProjectEnvironment
+      tags: [agentruns]
+      summary: Get the approved custom Docker environment for a project (desktop)
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Approved environment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvironment"
+        "404":
+          description: No environment approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    put:
+      operationId: setProjectEnvironment
+      tags: [agentruns]
+      summary: Approve a custom Docker environment for a project (desktop)
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ProjectEnvironmentInput"
+      responses:
+        "200":
+          description: Environment approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProjectEnvironment"
+    delete:
+      operationId: deleteProjectEnvironment
+      tags: [agentruns]
+      summary: Revoke the approved custom environment for a project (desktop)
+      parameters:
+        - name: projectId
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Environment revoked
+
 components:
   schemas:
     HealthStatus:
@@ -1103,6 +1164,58 @@ components:
           minLength: 1
       required:
         - path
+
+    ProjectEnvironment:
+      type: object
+      properties:
+        id:
+          type: integer
+        projectId:
+          type: integer
+        language:
+          type: ["string", "null"]
+        baseImage:
+          type: string
+        setupCommands:
+          type: array
+          items:
+            type: string
+        runCommand:
+          type: string
+        dockerfile:
+          type: ["string", "null"]
+        updatedAt:
+          type: string
+      required:
+        - id
+        - projectId
+        - language
+        - baseImage
+        - setupCommands
+        - runCommand
+        - dockerfile
+        - updatedAt
+
+    ProjectEnvironmentInput:
+      type: object
+      properties:
+        language:
+          type: string
+        baseImage:
+          type: string
+          minLength: 1
+        setupCommands:
+          type: array
+          items:
+            type: string
+        runCommand:
+          type: string
+          minLength: 1
+        dockerfile:
+          type: string
+      required:
+        - baseImage
+        - runCommand
 
     RuntimeCapabilities:
       type: object

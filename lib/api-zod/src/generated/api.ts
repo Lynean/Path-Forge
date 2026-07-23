@@ -561,3 +561,63 @@ export const SetProjectWorkspaceResponse = zod.object({
 })
 
 
+/**
+ * @summary Get the approved custom Docker environment for a project (desktop)
+ */
+export const GetProjectEnvironmentParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const GetProjectEnvironmentResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "language": zod.string().nullable(),
+  "baseImage": zod.string(),
+  "setupCommands": zod.array(zod.string()),
+  "runCommand": zod.string(),
+  "dockerfile": zod.string().nullable(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Approve a custom Docker environment for a project (desktop)
+ */
+export const SetProjectEnvironmentParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+
+
+
+
+export const SetProjectEnvironmentBody = zod.object({
+  "language": zod.string().optional(),
+  "baseImage": zod.string().min(1),
+  "setupCommands": zod.array(zod.string()).optional(),
+  "runCommand": zod.string().min(1),
+  "dockerfile": zod.string().optional()
+})
+
+export const SetProjectEnvironmentResponse = zod.object({
+  "id": zod.number(),
+  "projectId": zod.number(),
+  "language": zod.string().nullable(),
+  "baseImage": zod.string(),
+  "setupCommands": zod.array(zod.string()),
+  "runCommand": zod.string(),
+  "dockerfile": zod.string().nullable(),
+  "updatedAt": zod.string()
+})
+
+
+/**
+ * @summary Revoke the approved custom environment for a project (desktop)
+ */
+export const DeleteProjectEnvironmentParams = zod.object({
+  "projectId": zod.coerce.number()
+})
+
+export const DeleteProjectEnvironmentResponse = zod.void()
+
+

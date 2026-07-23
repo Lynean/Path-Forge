@@ -39,6 +39,17 @@ export interface LegacyChatContext {
    * runtime.
    */
   workspaceRoot?: string | null;
+  /**
+   * A custom Docker environment the learner approved for this project. When set
+   * (with a real folder), the harness gains a run_in_environment tool that
+   * builds and runs the project in it. Ignored by the legacy runtime.
+   */
+  approvedEnvironment?: {
+    baseImage: string;
+    setupCommands: string[];
+    runCommand: string;
+    dockerfile?: string | null;
+  } | null;
 }
 
 export interface LegacyAgentRuntimeDeps {

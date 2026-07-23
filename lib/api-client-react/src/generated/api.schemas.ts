@@ -278,6 +278,29 @@ export interface ProjectWorkspaceInput {
   path: string;
 }
 
+export interface ProjectEnvironment {
+  id: number;
+  projectId: number;
+  /** @nullable */
+  language: string | null;
+  baseImage: string;
+  setupCommands: string[];
+  runCommand: string;
+  /** @nullable */
+  dockerfile: string | null;
+  updatedAt: string;
+}
+
+export interface ProjectEnvironmentInput {
+  language?: string;
+  /** @minLength 1 */
+  baseImage: string;
+  setupCommands?: string[];
+  /** @minLength 1 */
+  runCommand: string;
+  dockerfile?: string;
+}
+
 export interface RuntimeCapabilities {
   dockerAvailable: boolean;
   dockerDetail: string;

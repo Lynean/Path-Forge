@@ -9,6 +9,7 @@ import {
   useGetNodeChat,
   useUpdateNodeStatus,
   useGetProject,
+  useSetProjectEnvironment,
   getGetNodeChatQueryKey,
   getGetNodeMapQueryKey,
   getGetProjectStatsQueryKey,
@@ -52,6 +53,7 @@ const TOOL_LABELS: Record<string, string> = {
   run_python: "Ran Python",
   run_command: "Ran command",
   propose_environment: "Proposed an environment",
+  run_in_environment: "Ran in custom environment",
   prepare_python_dependencies: "Prepared dependencies",
   apply_patch: "Proposed an edit",
   update_step: "Proposed a step change",
@@ -328,6 +330,10 @@ export function NodeStepLightbox({
   const [chatStreamingContent, setChatStreamingContent] = useState("");
   const [toolsUsed, setToolsUsed] = useState<Array<{ tool: string; detail?: string }>>([]);
   const [envProposal, setEnvProposal] = useState<EnvProposal | null>(null);
+  const [envApproved, setEnvApproved] = useState(false);
+  const setEnvironment = useSetProjectEnvironment({
+    mutation: { onSuccess: () => setEnvApproved(true) },
+  });
   const [chatLoaded, setChatLoaded] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
@@ -694,6 +700,7 @@ export function NodeStepLightbox({
                 ]);
               } else if (parsed.type === "environment_proposed" && parsed.proposal) {
                 setEnvProposal(parsed.proposal as EnvProposal);
+                setEnvApproved(false);
               } else if (parsed.type === "plan_updated" && typeof parsed.openingContent === "string") {
                 // Server has already applied the update_step/regenerate_session/add_steps
                 // tool call(s) to the canonical session plan and purged the step-detail
@@ -1400,9 +1407,38 @@ export function NodeStepLightbox({
                         <pre className="mt-1 overflow-x-auto rounded bg-black/30 p-2 font-mono text-[10px]">{envProposal.dockerfile}</pre>
                       </details>
                     )}
-                    <p className="mt-1 text-[10px] italic text-muted-foreground">
-                      Suggestion only — nothing runs automatically. Apply it yourself to run this project.
-                    </p>
+                    {envApproved ? (
+                      <p className="mt-1.5 text-[11px] font-medium text-green-600 dark:text-green-400">
+                        ✓ Approved — ask the tutor to build &amp; run your project in it.
+                      </p>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            envProposal?.baseImage &&
+                            envProposal?.runCommand &&
+                            setEnvironment.mutate({
+                              projectId,
+                              data: {
+                                language: envProposal.language,
+                                baseImage: envProposal.baseImage,
+                                setupCommands: envProposal.setupCommands,
+                                runCommand: envProposal.runCommand,
+                                dockerfile: envProposal.dockerfile,
+                              },
+                            })
+                          }
+                          disabled={setEnvironment.isPending || !envProposal.baseImage || !envProposal.runCommand}
+                          className="mt-1.5 rounded-md border border-amber-500/60 bg-amber-500/20 px-2.5 py-1 text-[11px] font-medium text-amber-800 hover:bg-amber-500/30 disabled:opacity-50 dark:text-amber-200"
+                        >
+                          {setEnvironment.isPending ? "Approving…" : "Approve & use this environment"}
+                        </button>
+                        <p className="mt-1 text-[10px] italic text-muted-foreground">
+                          Approving lets the tutor build this image and run your project in a locked sandbox.
+                        </p>
+                      </>
+                    )}
                   </div>
                 )}
                 <div ref={chatEndRef} />

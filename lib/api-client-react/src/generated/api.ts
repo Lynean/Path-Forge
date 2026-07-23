@@ -32,6 +32,8 @@ import type {
   NodeMap,
   NodeStatusUpdate,
   Project,
+  ProjectEnvironment,
+  ProjectEnvironmentInput,
   ProjectInput,
   ProjectRecommendationsResponse,
   ProjectStats,
@@ -2084,5 +2086,223 @@ export const useSetProjectWorkspace = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getSetProjectWorkspaceMutationOptions(options));
+    }
+
+export const getGetProjectEnvironmentUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/environment`
+}
+
+/**
+ * @summary Get the approved custom Docker environment for a project (desktop)
+ */
+export const getProjectEnvironment = async (projectId: number, options?: RequestInit): Promise<ProjectEnvironment> => {
+
+  return customFetch<ProjectEnvironment>(getGetProjectEnvironmentUrl(projectId),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetProjectEnvironmentQueryKey = (projectId: number,) => {
+    return [
+    `/api/projects/${projectId}/environment`
+    ] as const;
+    }
+
+
+export const getGetProjectEnvironmentQueryOptions = <TData = Awaited<ReturnType<typeof getProjectEnvironment>>, TError = ErrorType<ErrorResponse>>(projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectEnvironment>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetProjectEnvironmentQueryKey(projectId);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getProjectEnvironment>>> = ({ signal }) => getProjectEnvironment(projectId, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: projectId !== null && projectId !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getProjectEnvironment>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetProjectEnvironmentQueryResult = NonNullable<Awaited<ReturnType<typeof getProjectEnvironment>>>
+export type GetProjectEnvironmentQueryError = ErrorType<ErrorResponse>
+
+
+/**
+ * @summary Get the approved custom Docker environment for a project (desktop)
+ */
+
+export function useGetProjectEnvironment<TData = Awaited<ReturnType<typeof getProjectEnvironment>>, TError = ErrorType<ErrorResponse>>(
+ projectId: number, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getProjectEnvironment>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetProjectEnvironmentQueryOptions(projectId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getSetProjectEnvironmentUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/environment`
+}
+
+/**
+ * @summary Approve a custom Docker environment for a project (desktop)
+ */
+export const setProjectEnvironment = async (projectId: number,
+    projectEnvironmentInput: ProjectEnvironmentInput, options?: RequestInit): Promise<ProjectEnvironment> => {
+
+  return customFetch<ProjectEnvironment>(getSetProjectEnvironmentUrl(projectId),
+  {
+    ...options,
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    body: JSON.stringify(projectEnvironmentInput)
+  }
+);}
+
+
+
+
+export const getSetProjectEnvironmentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProjectEnvironment>>, TError,{projectId: number;data: BodyType<ProjectEnvironmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof setProjectEnvironment>>, TError,{projectId: number;data: BodyType<ProjectEnvironmentInput>}, TContext> => {
+
+const mutationKey = ['setProjectEnvironment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof setProjectEnvironment>>, {projectId: number;data: BodyType<ProjectEnvironmentInput>}> = (props) => {
+          const {projectId,data} = props ?? {};
+
+          return  setProjectEnvironment(projectId,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type SetProjectEnvironmentMutationResult = NonNullable<Awaited<ReturnType<typeof setProjectEnvironment>>>
+    export type SetProjectEnvironmentMutationBody = BodyType<ProjectEnvironmentInput>
+    export type SetProjectEnvironmentMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Approve a custom Docker environment for a project (desktop)
+ */
+export const useSetProjectEnvironment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setProjectEnvironment>>, TError,{projectId: number;data: BodyType<ProjectEnvironmentInput>}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof setProjectEnvironment>>,
+        TError,
+        {projectId: number;data: BodyType<ProjectEnvironmentInput>},
+        TContext
+      > => {
+      return useMutation(getSetProjectEnvironmentMutationOptions(options));
+    }
+
+export const getDeleteProjectEnvironmentUrl = (projectId: number,) => {
+
+
+
+
+  return `/api/projects/${projectId}/environment`
+}
+
+/**
+ * @summary Revoke the approved custom environment for a project (desktop)
+ */
+export const deleteProjectEnvironment = async (projectId: number, options?: RequestInit): Promise<void> => {
+
+  return customFetch<void>(getDeleteProjectEnvironmentUrl(projectId),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+export const getDeleteProjectEnvironmentMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProjectEnvironment>>, TError,{projectId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteProjectEnvironment>>, TError,{projectId: number}, TContext> => {
+
+const mutationKey = ['deleteProjectEnvironment'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteProjectEnvironment>>, {projectId: number}> = (props) => {
+          const {projectId} = props ?? {};
+
+          return  deleteProjectEnvironment(projectId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteProjectEnvironmentMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProjectEnvironment>>>
+
+    export type DeleteProjectEnvironmentMutationError = ErrorType<unknown>
+
+    /**
+ * @summary Revoke the approved custom environment for a project (desktop)
+ */
+export const useDeleteProjectEnvironment = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProjectEnvironment>>, TError,{projectId: number}, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteProjectEnvironment>>,
+        TError,
+        {projectId: number},
+        TContext
+      > => {
+      return useMutation(getDeleteProjectEnvironmentMutationOptions(options));
     }
 
