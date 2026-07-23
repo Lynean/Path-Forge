@@ -307,6 +307,8 @@ export function NodeStepLightbox({
   const [currentSlideIdx, setCurrentSlideIdx] = useState(0);
   const [isLoadingSlides, setIsLoadingSlides] = useState(false);
   const [streamingRaw, setStreamingRaw] = useState(""); // raw partial stream
+  const [isInspecting, setIsInspecting] = useState(false);
+  const [inspectionTools, setInspectionTools] = useState<Array<{ tool: string; detail?: string }>>([]);
   const slidesLoadedRef = useRef(false);
 
   // ── Chat state ───────────────────────────────────────────────────────────────
@@ -375,6 +377,8 @@ export function NodeStepLightbox({
   const fetchOpeningMessage = useCallback(async () => {
     setIsLoadingSlides(true);
     setStreamingRaw("");
+    setIsInspecting(false);
+    setInspectionTools([]);
     openingAbortRef.current = new AbortController();
 
     try {
@@ -405,7 +409,15 @@ export function NodeStepLightbox({
               const parsed = JSON.parse(line.slice(6).trim());
               if (parsed.type === "error") {
                 streamError = typeof parsed.error === "string" ? parsed.error : "Stream error";
+              } else if (parsed.type === "inspecting") {
+                setIsInspecting(true);
+              } else if (parsed.type === "tool_used") {
+                setInspectionTools((prev) => [
+                  ...prev,
+                  { tool: String(parsed.tool), detail: typeof parsed.detail === "string" ? parsed.detail : undefined },
+                ]);
               } else if (parsed.content) {
+                setIsInspecting(false);
                 fullContent += parsed.content;
                 setStreamingRaw(fullContent);
               }
@@ -1065,11 +1077,30 @@ export function NodeStepLightbox({
                   <div className="flex flex-col items-center justify-center h-full text-center py-12 gap-4">
                     <div className="w-10 h-10 border-4 border-primary border-t-transparent rounded-full animate-spin" />
                     <div>
-                      <p className="font-mono font-semibold text-sm">Preparing your session...</p>
+                      <p className="font-mono font-semibold text-sm">
+                        {isInspecting ? "Inspecting your project..." : "Preparing your session..."}
+                      </p>
                       <p className="text-xs text-muted-foreground mt-1">
-                        AI is generating your personalized steps for <strong>{node.title}</strong>
+                        {isInspecting ? (
+                          <>Reading your files to tailor <strong>{node.title}</strong></>
+                        ) : (
+                          <>AI is generating your personalized steps for <strong>{node.title}</strong></>
+                        )}
                       </p>
                     </div>
+                    {inspectionTools.length > 0 && (
+                      <div className="mx-1 max-w-xs space-y-0.5 rounded-lg border border-amber-400/40 bg-amber-300/15 px-3 py-2 text-left text-[11px] text-amber-700 backdrop-blur-sm dark:text-amber-200/90">
+                        {inspectionTools.map((t, i) => (
+                          <div key={i} className="flex items-center gap-1.5">
+                            <Wrench className="h-3 w-3 shrink-0" />
+                            <span className="font-mono">
+                              {TOOL_LABELS[t.tool] ?? t.tool}
+                              {t.detail ? <span className="opacity-70">: {t.detail}</span> : null}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ) : displaySlides.length === 0 ? (
                   <div className="space-y-4">

@@ -778,13 +778,19 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
   // reflect what the learner has really done and which file to change next.
   let liveInspection: string | undefined;
   if (attachedWorkspace?.path) {
+    res.write(`data: ${JSON.stringify({ type: "inspecting" })}\n\n`);
     liveInspection =
-      (await inspectProjectState({
-        node,
-        project,
-        profile: profile ?? null,
-        workspaceRoot: attachedWorkspace.path,
-      }).catch((err) => {
+      (await inspectProjectState(
+        {
+          node,
+          project,
+          profile: profile ?? null,
+          workspaceRoot: attachedWorkspace.path,
+        },
+        (tool, detail) => {
+          res.write(`data: ${JSON.stringify({ type: "tool_used", tool, detail })}\n\n`);
+        },
+      ).catch((err) => {
         req.log.warn({ err }, "project inspection for step generation failed");
         return "";
       })) || undefined;

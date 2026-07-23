@@ -358,12 +358,15 @@ export class HarnessAgentRuntime implements AgentRuntime {
  * file to change next). The format-reliable step writer then grounds the steps
  * in this report. Returns "" if inspection produced nothing.
  */
-export async function inspectProjectState(params: {
-  node: { id: number; title: string; brief: string };
-  project: { title: string; ideaPrompt: string };
-  profile: LearnerProfile | null;
-  workspaceRoot: string;
-}): Promise<string> {
+export async function inspectProjectState(
+  params: {
+    node: { id: number; title: string; brief: string };
+    project: { title: string; ideaPrompt: string };
+    profile: LearnerProfile | null;
+    workspaceRoot: string;
+  },
+  onTool?: (tool: string, detail?: string) => void,
+): Promise<string> {
   const { node, project, profile, workspaceRoot } = params;
   const workspace = new WorkspaceAccess(workspaceRoot);
   const model = await defaultCreateModel();
@@ -411,7 +414,16 @@ Reference the real file names and identifiers. This report will be given to the 
       messages: [],
       userMessage: instruction,
     })) {
-      if (event.type === "text_delta") report += event.content;
+      if (event.type === "tool_started" && onTool) {
+        const args = event.arguments as Record<string, unknown> | undefined;
+        const detail =
+          typeof args?.path === "string" ? args.path
+          : typeof args?.query === "string" ? args.query
+          : undefined;
+        onTool(event.tool, detail);
+      } else if (event.type === "text_delta") {
+        report += event.content;
+      }
     }
   } catch {
     return "";
