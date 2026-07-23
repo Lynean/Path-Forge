@@ -31,7 +31,25 @@ import {
   ChevronRight,
   Eye,
   ArrowRight,
+  Wrench,
 } from "lucide-react";
+
+// Friendly labels for the agent tools surfaced during a chat turn.
+const TOOL_LABELS: Record<string, string> = {
+  read_file: "Read file",
+  list_files: "Listed files",
+  search_code: "Searched code",
+  inspect_project: "Inspected project",
+  run_python: "Ran Python",
+  run_command: "Ran command",
+  prepare_python_dependencies: "Prepared dependencies",
+  apply_patch: "Proposed an edit",
+  update_step: "Proposed a step change",
+  add_steps: "Proposed new steps",
+  spawn_node: "Proposed a new node",
+  mark_steps_done: "Marked steps done",
+  regenerate_session: "Proposed a plan rebuild",
+};
 import {
   Dialog,
   DialogContent,
@@ -296,6 +314,7 @@ export function NodeStepLightbox({
   const [chatInput, setChatInput] = useState("");
   const [isChatStreaming, setIsChatStreaming] = useState(false);
   const [chatStreamingContent, setChatStreamingContent] = useState("");
+  const [toolsUsed, setToolsUsed] = useState<Array<{ tool: string; detail?: string }>>([]);
   const [chatLoaded, setChatLoaded] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
@@ -608,6 +627,7 @@ export function NodeStepLightbox({
     setChatMessages((prev) => [...prev, userMsg]);
     setIsChatStreaming(true);
     setChatStreamingContent("");
+    setToolsUsed([]);
 
     chatAbortRef.current = new AbortController();
 
@@ -644,6 +664,11 @@ export function NodeStepLightbox({
               } else if (parsed.type === "chunk" && parsed.content) {
                 fullResponse += parsed.content;
                 setChatStreamingContent(extractChatDisplay(fullResponse));
+              } else if (parsed.type === "tool_used") {
+                setToolsUsed((prev) => [
+                  ...prev,
+                  { tool: String(parsed.tool), detail: typeof parsed.detail === "string" ? parsed.detail : undefined },
+                ]);
               } else if (parsed.type === "plan_updated" && typeof parsed.openingContent === "string") {
                 // Server has already applied the update_step/regenerate_session/add_steps
                 // tool call(s) to the canonical session plan and purged the step-detail
@@ -1273,6 +1298,19 @@ export function NodeStepLightbox({
                       }
                       return <MessageBubble key={i} message={msg} />;
                     })}
+                    {isChatStreaming && toolsUsed.length > 0 && (
+                      <div className="mx-1 my-1 space-y-0.5 rounded-lg border border-amber-400/40 bg-amber-300/15 px-3 py-2 text-[11px] text-amber-700 backdrop-blur-sm dark:text-amber-200/90">
+                        {toolsUsed.map((t, i) => (
+                          <div key={i} className="flex items-center gap-1.5">
+                            <Wrench className="h-3 w-3 shrink-0" />
+                            <span className="font-mono">
+                              {TOOL_LABELS[t.tool] ?? t.tool}
+                              {t.detail ? <span className="opacity-70">: {t.detail}</span> : null}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     {isChatStreaming && chatStreamingContent && (
                       <MessageBubble
                         message={{ role: "assistant", content: chatStreamingContent, createdAt: new Date().toISOString() }}

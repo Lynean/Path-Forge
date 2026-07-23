@@ -910,6 +910,14 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
         if (event.type === "text_delta") {
           fullContent += event.content;
           res.write(`data: ${JSON.stringify({ type: "chunk", content: event.content })}\n\n`);
+        } else if (event.type === "tool_started") {
+          // Surface each tool the agent uses so the UI can show a small activity note.
+          const args = event.arguments as Record<string, unknown> | undefined;
+          const detail = typeof args?.path === "string" ? args.path
+            : typeof args?.query === "string" ? args.query
+            : typeof args?.title === "string" ? args.title
+            : undefined;
+          res.write(`data: ${JSON.stringify({ type: "tool_used", tool: event.tool, detail })}\n\n`);
         } else if (event.type === "tool_completed") {
           toolCalls.push({ name: event.tool as ChatToolCall["name"], args: event.output as Record<string, unknown> });
         } else if (event.type === "failed") {
