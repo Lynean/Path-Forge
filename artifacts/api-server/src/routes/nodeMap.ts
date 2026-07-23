@@ -34,7 +34,7 @@ import { requireAuth, getAuthUserId } from "../lib/auth";
 import { generateNodeMap } from "../lib/aiNodeMap";
 import { readWorkspaceSnapshot } from "../lib/workspaceSnapshot";
 import { streamVisualization } from "../lib/aiVisualize";
-import { createAgentRuntime, resolveAgentRuntimeKind } from "../lib/agent";
+import { createAgentRuntime, resolveAgentRuntimeKind, inspectProjectState } from "../lib/agent";
 import { DbRunRecorder } from "../lib/agent/db-run-recorder";
 import {
   streamNodeChatMessage,
@@ -770,9 +770,29 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
     res.write(": ping\n\n");
   }, 15000);
 
+  const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
+    .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
+
+  // With a real folder attached, a read-only agent inspects the actual project
+  // first; its state report grounds the (format-reliable) step writer so steps
+  // reflect what the learner has really done and which file to change next.
+  let liveInspection: string | undefined;
+  if (attachedWorkspace?.path) {
+    liveInspection =
+      (await inspectProjectState({
+        node,
+        project,
+        profile: profile ?? null,
+        workspaceRoot: attachedWorkspace.path,
+      }).catch((err) => {
+        req.log.warn({ err }, "project inspection for step generation failed");
+        return "";
+      })) || undefined;
+  }
+
   let fullContent = "";
   try {
-    for await (const chunk of streamOpeningMessage(node, project, profile ?? null, { allNodes, allEdges }, recentConcerns, codeFiles)) {
+    for await (const chunk of streamOpeningMessage(node, project, profile ?? null, { allNodes, allEdges }, recentConcerns, codeFiles, undefined, liveInspection)) {
       fullContent += chunk;
       res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
     }

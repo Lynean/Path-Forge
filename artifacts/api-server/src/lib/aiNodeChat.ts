@@ -665,15 +665,21 @@ export async function* streamNodeChatMessage(
   return toolCalls;
 }
 
-export async function* streamOpeningMessage(
+/**
+ * Builds the system + user prompts for a node's session-plan (steps) generation.
+ * Extracted so both the plain completion (`streamOpeningMessage`) and the
+ * read-only agentic step planner can share the exact same tuned instructions.
+ */
+export function buildOpeningMessagePrompt(
   node: DbNode,
   project: { title: string; ideaPrompt: string },
   profile: LearnerProfile | null,
   mapCtx: MapContext,
   recentConcerns: string[],
   codeFiles: CodeFile[],
-  regeneration?: { reason: string; facts: string[] }
-): AsyncGenerator<string> {
+  regeneration?: { reason: string; facts: string[] },
+  liveInspection?: string
+): { systemPrompt: string; userPrompt: string } {
   const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles);
 
   const isExplainerNode = node.isExtra
@@ -703,8 +709,19 @@ Write the steps around this: reference the actual files/functions named here, an
 `
     : "";
 
+  // A fresh read of the learner's real project, gathered just now by a read-only
+  // agent. Authoritative for the CURRENT state (more up-to-date than the
+  // planner's earlier snapshot), so steps reflect what the learner has actually
+  // done so far and point to the right next change.
+  const liveInspectionSection = liveInspection
+    ? `\n## Live inspection of the learner's ACTUAL project (just gathered by reading the real files — authoritative for the current state)
+${liveInspection}
+Ground every step in this real state: reference the actual files/functions, skip what is already implemented, and point the learner to the specific next file/change.
+`
+    : "";
+
   const userPrompt = `[Opening message for node: "${node.title}"]
-${regenerationSection}${plannerGuidance}
+${regenerationSection}${plannerGuidance}${liveInspectionSection}
 Generate a structured session plan using EXACTLY this format with the slide markers. Do not add any text before [SLIDE:intro].
 
 [SLIDE:intro]
@@ -729,6 +746,23 @@ ${stepStyleNote}
 Use the actual filenames, commands, component names, and domain terms from this project — never generic placeholders.
 Use LaTeX math notation ($...$ for inline, $$...$$ for block) for any formulas or equations.
 `;
+
+  return { systemPrompt, userPrompt };
+}
+
+export async function* streamOpeningMessage(
+  node: DbNode,
+  project: { title: string; ideaPrompt: string },
+  profile: LearnerProfile | null,
+  mapCtx: MapContext,
+  recentConcerns: string[],
+  codeFiles: CodeFile[],
+  regeneration?: { reason: string; facts: string[] },
+  liveInspection?: string
+): AsyncGenerator<string> {
+  const { systemPrompt, userPrompt } = buildOpeningMessagePrompt(
+    node, project, profile, mapCtx, recentConcerns, codeFiles, regeneration, liveInspection
+  );
 
   const stream = await openrouter.chat.completions.create({
     model: MODEL,

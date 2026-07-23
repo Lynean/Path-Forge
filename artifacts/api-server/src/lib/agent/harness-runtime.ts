@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -21,6 +22,8 @@ import {
   ToolRegistry,
   UnsupportedRunCommandTool,
   WorkspaceAccess,
+  type AgentContextDocuments,
+  type AgentContextProvider,
   type AgentEvent,
   type AgentRuntime,
   type AgentTool,
@@ -29,9 +32,18 @@ import {
   type CompletionRequest,
   type ModelAdapter,
 } from "@workspace/agent-runtime";
+import type { LearnerProfile } from "@workspace/db";
 import type { LegacyChatContext } from "./legacy-runtime";
 import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
 import { RunPythonTool } from "./tools/run-python-tool";
+
+/** Supplies SOUL/USER/PROJECT context to the harness from in-memory strings. */
+class InlineContextProvider implements AgentContextProvider {
+  constructor(private readonly documents: AgentContextDocuments) {}
+  async load(): Promise<AgentContextDocuments> {
+    return this.documents;
+  }
+}
 
 const MODEL = "google/gemini-3.1-flash-lite";
 const NO_SANDBOX_MESSAGE =
@@ -335,4 +347,74 @@ export class HarnessAgentRuntime implements AgentRuntime {
   async cancel(runId: string): Promise<void> {
     await this.active.get(runId)?.cancel(runId);
   }
+}
+
+/**
+ * Read-only inspection pass for step generation. When a lesson has a real local
+ * folder, this runs a harness turn with ONLY the read tools
+ * (inspect_project/list_files/read_file/search_code — no write, no run) plus
+ * SOUL/USER/PROJECT context, and returns a concise report of the ACTUAL current
+ * project state for this node (what exists, what's done, what's missing, which
+ * file to change next). The format-reliable step writer then grounds the steps
+ * in this report. Returns "" if inspection produced nothing.
+ */
+export async function inspectProjectState(params: {
+  node: { id: number; title: string; brief: string };
+  project: { title: string; ideaPrompt: string };
+  profile: LearnerProfile | null;
+  workspaceRoot: string;
+}): Promise<string> {
+  const { node, project, profile, workspaceRoot } = params;
+  const workspace = new WorkspaceAccess(workspaceRoot);
+  const model = await defaultCreateModel();
+
+  const soul =
+    "Inspect the learner's real project with the read-only tools before reporting. Ground everything in the actual files and current state — which files exist, what is implemented, what is missing. Be precise and concise.";
+  const userDoc = profile
+    ? [
+        profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
+        profile.major ? `Field: ${profile.major}` : null,
+        profile.profileSummary || null,
+      ]
+        .filter(Boolean)
+        .join("\n")
+    : "No learner profile available.";
+  const projectDoc = `${project.title}\n\n${project.ideaPrompt}`;
+
+  const harness = new AgentHarness({
+    model,
+    context: new InlineContextProvider({ soul, user: userDoc, project: projectDoc }),
+    tools: new ToolRegistry([
+      new InspectProjectTool(workspace),
+      new ListFilesTool(workspace),
+      new ReadFileTool(workspace),
+      new SearchCodeTool(workspace),
+    ]),
+    budgets: { maxRunDurationMs: 120_000, maxToolDurationMs: 60_000 },
+  });
+
+  const instruction = `Inspect the learner's ACTUAL project for the current learning node "${node.title}"${node.brief ? ` (${node.brief})` : ""}. Use the read-only tools to list files and read the ones relevant to this node.
+
+Then write a CONCISE report (~120 words, prose, no headers) of the CURRENT STATE relevant to this node:
+- which files exist and what is already implemented,
+- what is missing or incomplete for this node's goal,
+- the specific file(s) and function(s) the learner should change next.
+Reference the real file names and identifiers. This report will be given to the step writer — do not write learner-facing steps yourself.`;
+
+  let report = "";
+  try {
+    for await (const event of harness.runTurn({
+      runId: randomUUID(),
+      workspaceId: "step-inspector",
+      preferredLanguage: profile?.preferredLanguage ?? null,
+      currentNode: { id: node.id, title: node.title, brief: node.brief || undefined },
+      messages: [],
+      userMessage: instruction,
+    })) {
+      if (event.type === "text_delta") report += event.content;
+    }
+  } catch {
+    return "";
+  }
+  return report.trim();
 }
