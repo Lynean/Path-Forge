@@ -108,6 +108,7 @@ interface AINode {
   status: "locked" | "available" | "completed";
   is_extra: boolean;
   prerequisite_ids: string[];
+  agent_context?: string;
 }
 
 interface AINodeMapResponse {
@@ -340,6 +341,13 @@ export async function generateNodeMap(
 
   const langInstruction = getLangInstruction(profile);
 
+  // Nodes are generated once here but their per-node STEPS are written later, in
+  // isolation, with no view of the folder. When a folder is attached, hand each
+  // node a directory-grounded, agent-facing note so the step writer isn't blind.
+  const agentContextRule = projectSnapshot
+    ? `\n- Because the learner has an existing project attached, ALSO give EVERY node an "agent_context": 2–4 sentences of agent-facing guidance (NEVER shown to the learner) that grounds THAT node in the actual project — name the specific existing files/functions/config relevant to this node, tell the tutor what to inspect or run first (e.g. read or run a specific file), and state what this node should build or verify on top of what already exists. This is the planner's handoff so the step generator, which sees only this one node, knows the real project state. Base it on the snapshot, not guesses.`
+    : "";
+
   const systemPrompt = `You are an expert curriculum designer for self-directed learners. Your job is to generate a structured, personalized learning node map (a directed acyclic graph of learning steps) for a given project idea.
 
 The learner profile is:
@@ -368,9 +376,9 @@ Rules for the node map:
 - Before any node whose instructions assume a specific capability is available (compute/memory/storage capacity, account tier, API scope, hardware resource, dataset size), include a node that confirms the learner's actual setup meets that requirement. A capability mismatch should surface as an early checkpoint, never for the first time as a failure during implementation.
 - When a project involves non-trivial environment or tooling setup (cross-compilation, cloud accounts, lab environments, cross-platform builds, connector/API onboarding, GPU/cloud provisioning), give environment setup and verification its own dedicated node(s), separate from nodes that write or configure actual project logic — don't let environment debugging consume a code/logic node's scope.
 
-${projectTypeRules}
+${projectTypeRules}${agentContextRule}
 ${langInstruction}
-Respond ONLY with valid JSON matching this exact schema, no markdown:
+Respond ONLY with valid JSON matching this exact schema, no markdown${projectSnapshot ? ' (include "agent_context" on every node)' : ' (omit "agent_context")'}:
 {
   "nodes": [
     {
@@ -378,7 +386,8 @@ Respond ONLY with valid JSON matching this exact schema, no markdown:
       "title": "Node Title",
       "brief": "1-2 sentence description of what the learner will learn in this step.",
       "is_extra": false,
-      "prerequisite_ids": []
+      "prerequisite_ids": [],
+      "agent_context": "Agent-facing directory-grounded guidance for writing this node's steps (only when a project is attached)."
     },
     {
       "id": "n2",

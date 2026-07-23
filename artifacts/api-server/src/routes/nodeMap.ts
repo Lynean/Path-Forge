@@ -595,6 +595,7 @@ router.post("/projects/:projectId/generate-map", requireAuth, async (req, res): 
         brief: aiNode.brief,
         status: isStarter ? "available" : "locked",
         isExtra: aiNode.is_extra,
+        agentContext: aiNode.agent_context?.trim() || null,
       }).returning();
       aiIdToDbId.set(aiNode.id, insertedNode.id);
     }

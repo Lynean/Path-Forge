@@ -693,8 +693,18 @@ ${regeneration.facts.length > 0
 `
     : "";
 
+  // The planner saw the learner's whole project folder; this node did not. Its
+  // directory-grounded handoff is authoritative for writing steps that reference
+  // the real files/code instead of generic placeholders.
+  const plannerGuidance = node.agentContext
+    ? `\n## Planner's directory-grounded guidance for this node (authoritative — the learner has a real project attached)
+${node.agentContext}
+Write the steps around this: reference the actual files/functions named here, and where useful have the learner inspect or run the real code (the side-chat tutor can read and run the project). Do not invent files or restate generic advice that ignores what already exists.
+`
+    : "";
+
   const userPrompt = `[Opening message for node: "${node.title}"]
-${regenerationSection}
+${regenerationSection}${plannerGuidance}
 Generate a structured session plan using EXACTLY this format with the slide markers. Do not add any text before [SLIDE:intro].
 
 [SLIDE:intro]

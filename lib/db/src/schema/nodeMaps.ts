@@ -19,6 +19,12 @@ export const nodesTable = pgTable("nodes", {
   status: text("status").notNull().default("locked"),
   isExtra: boolean("is_extra").notNull().default(false),
   summary: text("summary"),
+  // Planner's directory-grounded, agent-facing handoff for this node (not shown
+  // to the learner): what already exists in the attached project relevant to
+  // this node, what to inspect/run first, and what to build/verify on top of it.
+  // Consumed when generating this node's steps, since nodes are otherwise
+  // independent and blind to the real folder.
+  agentContext: text("agent_context"),
   positionX: real("position_x"),
   positionY: real("position_y"),
   createdAt: timestamp("created_at", { withTimezone: true, mode: "string" }).notNull().defaultNow(),
