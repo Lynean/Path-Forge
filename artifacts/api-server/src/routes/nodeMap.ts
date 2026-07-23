@@ -926,6 +926,13 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
           res.write(`data: ${JSON.stringify({ type: "tool_used", tool: event.tool, detail })}\n\n`);
         } else if (event.type === "tool_completed") {
           toolCalls.push({ name: event.tool as ChatToolCall["name"], args: event.output as Record<string, unknown> });
+          // Surface a full environment proposal so the UI can show a recipe card.
+          if (event.tool === "propose_environment") {
+            const output = event.output as { proposedEnvironment?: unknown } | undefined;
+            if (output?.proposedEnvironment) {
+              res.write(`data: ${JSON.stringify({ type: "environment_proposed", proposal: output.proposedEnvironment })}\n\n`);
+            }
+          }
         } else if (event.type === "failed") {
           // Re-raise so the existing catch emits the identical error SSE and skips DB writes.
           throw new Error(event.message);

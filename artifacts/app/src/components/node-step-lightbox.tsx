@@ -34,6 +34,15 @@ import {
   Wrench,
 } from "lucide-react";
 
+type EnvProposal = {
+  language?: string;
+  baseImage?: string;
+  setupCommands?: string[];
+  runCommand?: string;
+  reason?: string;
+  dockerfile?: string;
+};
+
 // Friendly labels for the agent tools surfaced during a chat turn.
 const TOOL_LABELS: Record<string, string> = {
   read_file: "Read file",
@@ -318,6 +327,7 @@ export function NodeStepLightbox({
   const [isChatStreaming, setIsChatStreaming] = useState(false);
   const [chatStreamingContent, setChatStreamingContent] = useState("");
   const [toolsUsed, setToolsUsed] = useState<Array<{ tool: string; detail?: string }>>([]);
+  const [envProposal, setEnvProposal] = useState<EnvProposal | null>(null);
   const [chatLoaded, setChatLoaded] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const chatAbortRef = useRef<AbortController | null>(null);
@@ -682,6 +692,8 @@ export function NodeStepLightbox({
                   ...prev,
                   { tool: String(parsed.tool), detail: typeof parsed.detail === "string" ? parsed.detail : undefined },
                 ]);
+              } else if (parsed.type === "environment_proposed" && parsed.proposal) {
+                setEnvProposal(parsed.proposal as EnvProposal);
               } else if (parsed.type === "plan_updated" && typeof parsed.openingContent === "string") {
                 // Server has already applied the update_step/regenerate_session/add_steps
                 // tool call(s) to the canonical session plan and purged the step-detail
@@ -1350,6 +1362,48 @@ export function NodeStepLightbox({
                     )}
                     {isChatStreaming && !chatStreamingContent && <TypingIndicator />}
                   </>
+                )}
+                {envProposal && (
+                  <div className="mx-1 my-2 rounded-lg border border-amber-400/50 bg-amber-300/10 p-3 text-xs backdrop-blur-sm">
+                    <div className="mb-1.5 flex items-center gap-1.5 font-mono font-semibold text-amber-700 dark:text-amber-300">
+                      <Wrench className="h-3.5 w-3.5" />
+                      Suggested environment{envProposal.language ? ` · ${envProposal.language}` : ""}
+                    </div>
+                    {envProposal.baseImage && (
+                      <div className="mb-1">
+                        <span className="text-muted-foreground">Base image: </span>
+                        <code className="rounded bg-black/20 px-1 py-0.5 font-mono">{envProposal.baseImage}</code>
+                      </div>
+                    )}
+                    {envProposal.setupCommands && envProposal.setupCommands.length > 0 && (
+                      <div className="mb-1">
+                        <span className="text-muted-foreground">Setup:</span>
+                        <ul className="mt-0.5 space-y-0.5">
+                          {envProposal.setupCommands.map((c, i) => (
+                            <li key={i}>
+                              <code className="rounded bg-black/20 px-1 py-0.5 font-mono">{c}</code>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {envProposal.runCommand && (
+                      <div className="mb-1">
+                        <span className="text-muted-foreground">Run: </span>
+                        <code className="rounded bg-black/20 px-1 py-0.5 font-mono">{envProposal.runCommand}</code>
+                      </div>
+                    )}
+                    {envProposal.reason && <p className="mb-1 text-muted-foreground">{envProposal.reason}</p>}
+                    {envProposal.dockerfile && (
+                      <details className="mb-1">
+                        <summary className="cursor-pointer text-amber-700 dark:text-amber-300">Dockerfile</summary>
+                        <pre className="mt-1 overflow-x-auto rounded bg-black/30 p-2 font-mono text-[10px]">{envProposal.dockerfile}</pre>
+                      </details>
+                    )}
+                    <p className="mt-1 text-[10px] italic text-muted-foreground">
+                      Suggestion only — nothing runs automatically. Apply it yourself to run this project.
+                    </p>
+                  </div>
                 )}
                 <div ref={chatEndRef} />
               </div>
