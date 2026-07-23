@@ -278,6 +278,12 @@ export interface ProjectWorkspaceInput {
   path: string;
 }
 
+export interface RuntimeCapabilities {
+  dockerAvailable: boolean;
+  dockerDetail: string;
+  canRunCode: boolean;
+}
+
 export type ListAgentRunsParams = {
 limit?: number;
 };

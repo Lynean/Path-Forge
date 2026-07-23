@@ -514,6 +514,16 @@ export const GetAgentRunResponse = zod.object({
 
 
 /**
+ * @summary What the local runtime can do (e.g. whether code can run in a sandbox)
+ */
+export const GetRuntimeCapabilitiesResponse = zod.object({
+  "dockerAvailable": zod.boolean(),
+  "dockerDetail": zod.string(),
+  "canRunCode": zod.boolean()
+})
+
+
+/**
  * @summary Get the local project folder attached to a project (desktop)
  */
 export const GetProjectWorkspaceParams = zod.object({

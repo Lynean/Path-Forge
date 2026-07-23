@@ -37,6 +37,7 @@ export * from './projectUpdateStatus';
 export * from './projectWorkspace';
 export * from './projectWorkspaceInput';
 export * from './revisePlanInput';
+export * from './runtimeCapabilities';
 export * from './spawnNodeInput';
 export * from './stepDetailInput';
 export * from './visualizeInput';

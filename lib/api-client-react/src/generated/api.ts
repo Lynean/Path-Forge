@@ -39,6 +39,7 @@ import type {
   ProjectWorkspace,
   ProjectWorkspaceInput,
   RevisePlanInput,
+  RuntimeCapabilities,
   SpawnNodeInput,
   StepDetailInput,
   VisualizeInput
@@ -1848,6 +1849,83 @@ export function useGetAgentRun<TData = Awaited<ReturnType<typeof getAgentRun>>, 
  ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
 
   const queryOptions = getGetAgentRunQueryOptions(runId,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getGetRuntimeCapabilitiesUrl = () => {
+
+
+
+
+  return `/api/runtime/capabilities`
+}
+
+/**
+ * @summary What the local runtime can do (e.g. whether code can run in a sandbox)
+ */
+export const getRuntimeCapabilities = async ( options?: RequestInit): Promise<RuntimeCapabilities> => {
+
+  return customFetch<RuntimeCapabilities>(getGetRuntimeCapabilitiesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetRuntimeCapabilitiesQueryKey = () => {
+    return [
+    `/api/runtime/capabilities`
+    ] as const;
+    }
+
+
+export const getGetRuntimeCapabilitiesQueryOptions = <TData = Awaited<ReturnType<typeof getRuntimeCapabilities>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRuntimeCapabilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetRuntimeCapabilitiesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getRuntimeCapabilities>>> = ({ signal }) => getRuntimeCapabilities({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getRuntimeCapabilities>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetRuntimeCapabilitiesQueryResult = NonNullable<Awaited<ReturnType<typeof getRuntimeCapabilities>>>
+export type GetRuntimeCapabilitiesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary What the local runtime can do (e.g. whether code can run in a sandbox)
+ */
+
+export function useGetRuntimeCapabilities<TData = Awaited<ReturnType<typeof getRuntimeCapabilities>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getRuntimeCapabilities>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetRuntimeCapabilitiesQueryOptions(options)
 
   const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
 

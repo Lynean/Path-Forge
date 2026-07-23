@@ -613,6 +613,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /runtime/capabilities:
+    get:
+      operationId: getRuntimeCapabilities
+      tags: [agentruns]
+      summary: What the local runtime can do (e.g. whether code can run in a sandbox)
+      responses:
+        "200":
+          description: Runtime capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RuntimeCapabilities"
+
   /projects/{projectId}/workspace:
     get:
       operationId: getProjectWorkspace
@@ -1090,3 +1103,17 @@ components:
           minLength: 1
       required:
         - path
+
+    RuntimeCapabilities:
+      type: object
+      properties:
+        dockerAvailable:
+          type: boolean
+        dockerDetail:
+          type: string
+        canRunCode:
+          type: boolean
+      required:
+        - dockerAvailable
+        - dockerDetail
+        - canRunCode
