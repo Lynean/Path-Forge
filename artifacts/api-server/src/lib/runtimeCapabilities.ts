@@ -7,7 +7,9 @@ export interface RuntimeCapabilities {
   dockerAvailable: boolean;
   /** Human-readable detail (e.g. why Docker isn't available). */
   dockerDetail: string;
-  /** Whether the learner can run code in a sandbox right now (today: Docker). */
+  /** Whether Python can run with no Docker (WASM sandbox) — always true. */
+  canRunPython: boolean;
+  /** Whether full multi-language execution is available (needs Docker). */
   canRunCode: boolean;
 }
 
@@ -33,7 +35,12 @@ export async function getRuntimeCapabilities(): Promise<RuntimeCapabilities> {
     dockerDetail = error instanceof Error ? error.message : "Docker check failed.";
   }
 
-  const value: RuntimeCapabilities = { dockerAvailable, dockerDetail, canRunCode: dockerAvailable };
+  const value: RuntimeCapabilities = {
+    dockerAvailable,
+    dockerDetail,
+    canRunPython: true, // WASM (Pyodide) is always available, no install needed
+    canRunCode: dockerAvailable,
+  };
   cached = { at: Date.now(), value };
   return value;
 }

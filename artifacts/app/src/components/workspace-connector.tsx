@@ -83,12 +83,19 @@ export function WorkspaceConnector({ projectId }: { projectId: number }) {
           <span className="flex items-center gap-1 text-[10px] font-mono text-green-500">
             <Play className="w-2.5 h-2.5" /> can run code
           </span>
+        ) : caps.canRunPython ? (
+          <span
+            className="flex items-center gap-1 text-[10px] font-mono text-sky-500 cursor-help"
+            title={`Python runs in a built-in sandbox — no install needed. ${caps.dockerDetail} Install Docker for other languages and full projects.`}
+          >
+            <Play className="w-2.5 h-2.5" /> runs Python · Docker for more
+          </span>
         ) : (
           <span
             className="flex items-center gap-1 text-[10px] font-mono text-amber-500 cursor-help"
             title={`${caps.dockerDetail} The tutor can still read your files.`}
           >
-            <Eye className="w-2.5 h-2.5" /> reading only · install Docker to run
+            <Eye className="w-2.5 h-2.5" /> reading only
           </span>
         )
       ) : null}

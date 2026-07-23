@@ -519,7 +519,8 @@ export const GetAgentRunResponse = zod.object({
 export const GetRuntimeCapabilitiesResponse = zod.object({
   "dockerAvailable": zod.boolean(),
   "dockerDetail": zod.string(),
-  "canRunCode": zod.boolean()
+  "canRunPython": zod.boolean().describe('Whether Python can run with no Docker (WASM sandbox)'),
+  "canRunCode": zod.boolean().describe('Whether full multi-language code execution is available (Docker)')
 })
 
 

@@ -281,6 +281,9 @@ export interface ProjectWorkspaceInput {
 export interface RuntimeCapabilities {
   dockerAvailable: boolean;
   dockerDetail: string;
+  /** Whether Python can run with no Docker (WASM sandbox) */
+  canRunPython: boolean;
+  /** Whether full multi-language code execution is available (Docker) */
   canRunCode: boolean;
 }
 

@@ -1111,9 +1111,14 @@ components:
           type: boolean
         dockerDetail:
           type: string
+        canRunPython:
+          type: boolean
+          description: Whether Python can run with no Docker (WASM sandbox)
         canRunCode:
           type: boolean
+          description: Whether full multi-language code execution is available (Docker)
       required:
         - dockerAvailable
         - dockerDetail
+        - canRunPython
         - canRunCode
