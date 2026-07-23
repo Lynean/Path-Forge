@@ -42,6 +42,7 @@ const TOOL_LABELS: Record<string, string> = {
   inspect_project: "Inspected project",
   run_python: "Ran Python",
   run_command: "Ran command",
+  propose_environment: "Proposed an environment",
   prepare_python_dependencies: "Prepared dependencies",
   apply_patch: "Proposed an edit",
   update_step: "Proposed a step change",

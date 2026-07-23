@@ -36,6 +36,7 @@ import type { LearnerProfile } from "@workspace/db";
 import type { LegacyChatContext } from "./legacy-runtime";
 import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
 import { RunPythonTool } from "./tools/run-python-tool";
+import { ProposeEnvironmentTool } from "./tools/propose-environment-tool";
 
 /** Supplies SOUL/USER/PROJECT context to the harness from in-memory strings. */
 class InlineContextProvider implements AgentContextProvider {
@@ -324,6 +325,9 @@ export class HarnessAgentRuntime implements AgentRuntime {
         // Zero-install Python execution (WASM) — available even without Docker,
         // so the tutor can run/verify common Python regardless of the sandbox.
         new RunPythonTool(workspace),
+        // Propose a Docker environment for project types the built-in sandboxes
+        // don't cover (recorded/shown only — nothing is built or run).
+        new ProposeEnvironmentTool(),
         // PathForge learning-plan proposals (update steps, spawn nodes, …). The
         // harness only proposes; the chat route applies them to Postgres.
         ...createPathforgePlanTools(),

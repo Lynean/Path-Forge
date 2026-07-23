@@ -16,7 +16,8 @@
     "agent:verify-real-folder": "tsx src/lib/agent/verify-real-folder.ts",
     "agent:verify-run-python": "tsx src/lib/wasm/verify-run-python.ts",
     "agent:verify-run-python-tool": "tsx src/lib/agent/tools/verify-run-python-tool.ts",
-    "agent:verify-invalid-arg-recovery": "tsx src/lib/agent/verify-invalid-arg-recovery.ts"
+    "agent:verify-invalid-arg-recovery": "tsx src/lib/agent/verify-invalid-arg-recovery.ts",
+    "agent:verify-propose-environment": "tsx src/lib/agent/tools/verify-propose-environment.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.31",
