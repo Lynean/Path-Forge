@@ -18,6 +18,9 @@ export interface HarnessRunBudgets {
   maxToolCalls: number;
   maxRunDurationMs: number;
   maxToolDurationMs: number;
+  /** How many times a malformed tool-argument call is fed back for the model to
+   * self-correct before the run is stopped. */
+  maxInvalidArgumentRetries: number;
 }
 
 export interface HarnessOptions {
@@ -34,6 +37,7 @@ export const DEFAULT_HARNESS_RUN_BUDGETS: HarnessRunBudgets = {
   maxToolCalls: 20,
   maxRunDurationMs: 120_000,
   maxToolDurationMs: 30_000,
+  maxInvalidArgumentRetries: 2,
 };
 
 class RunStoppedError extends Error {
@@ -112,6 +116,10 @@ export class AgentHarness implements AgentRuntime {
       maxToolDurationMs: positiveInteger(
         "maxToolDurationMs",
         requested.maxToolDurationMs ?? DEFAULT_HARNESS_RUN_BUDGETS.maxToolDurationMs,
+      ),
+      maxInvalidArgumentRetries: positiveInteger(
+        "maxInvalidArgumentRetries",
+        requested.maxInvalidArgumentRetries ?? DEFAULT_HARNESS_RUN_BUDGETS.maxInvalidArgumentRetries,
       ),
     };
   }
@@ -203,6 +211,7 @@ export class AgentHarness implements AgentRuntime {
     const warnedDuplicateSignatures = new Set<string>();
     let toolStateRevision = 0;
     let requestedToolCalls = 0;
+    let invalidArgumentAttempts = 0;
     let resourcesFinished = false;
     const finishResources = async (): Promise<void> => {
       if (resourcesFinished) return;
@@ -295,11 +304,32 @@ export class AgentHarness implements AgentRuntime {
 
         const parsedArguments = tool.inputSchema.safeParse(decision.call.arguments);
         if (!parsedArguments.success) {
-          throw new RunStoppedError(
-            "policy_rejected",
-            "INVALID_TOOL_ARGUMENTS",
-            `Invalid arguments for tool ${tool.name}: ${parsedArguments.error.message}`,
-          );
+          // Recoverable: feed the validation error back so the model can fix its
+          // arguments and retry, bounded so a persistently-wrong model still stops.
+          invalidArgumentAttempts += 1;
+          const detail = `Invalid arguments for tool ${tool.name}: ${parsedArguments.error.message}`;
+          if (invalidArgumentAttempts > this.budgets.maxInvalidArgumentRetries) {
+            throw new RunStoppedError(
+              "policy_rejected",
+              "INVALID_TOOL_ARGUMENTS",
+              `${detail} (after ${this.budgets.maxInvalidArgumentRetries} retries)`,
+            );
+          }
+          const message = `${detail}. Fix the arguments to exactly match the tool's input schema (do not add extra keys) and call it again.`;
+          const output = { error: "INVALID_TOOL_ARGUMENTS", message };
+          observations.push({
+            toolCallId: decision.call.id,
+            tool: tool.name,
+            arguments: (decision.call.arguments ?? {}) as Record<string, unknown>,
+            output,
+          });
+          yield {
+            type: "tool_rejected",
+            tool: tool.name,
+            code: "INVALID_TOOL_ARGUMENTS",
+            message,
+          };
+          continue;
         }
 
         const callSignature = `${toolStateRevision}:${tool.name}:${canonicalize(parsedArguments.data)}`;
