@@ -32,6 +32,9 @@ async function buildAll() {
       // Ships WASM + a Postgres fs image (pglite.data) that can't be inlined;
       // load it from node_modules at runtime instead of bundling.
       "@electric-sql/pglite",
+      // Pyodide ships WASM + a Python stdlib bundle it loads from its package
+      // dir at runtime; must stay external, not bundled.
+      "pyodide",
       "sharp",
       "better-sqlite3",
       "sqlite3",
