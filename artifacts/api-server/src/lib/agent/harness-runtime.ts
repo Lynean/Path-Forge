@@ -31,6 +31,7 @@ import {
 } from "@workspace/agent-runtime";
 import type { LegacyChatContext } from "./legacy-runtime";
 import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
+import { RunPythonTool } from "./tools/run-python-tool";
 
 const MODEL = "google/gemini-3.1-flash-lite";
 const NO_SANDBOX_MESSAGE =
@@ -308,6 +309,9 @@ export class HarnessAgentRuntime implements AgentRuntime {
         new ApplyPatchTool(workspace, sandboxes),
         new PreparePythonDependenciesTool({ workspace, sandboxes }),
         commandTool,
+        // Zero-install Python execution (WASM) — available even without Docker,
+        // so the tutor can run/verify common Python regardless of the sandbox.
+        new RunPythonTool(workspace),
         // PathForge learning-plan proposals (update steps, spawn nodes, …). The
         // harness only proposes; the chat route applies them to Postgres.
         ...createPathforgePlanTools(),

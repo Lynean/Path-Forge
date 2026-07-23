@@ -14,7 +14,8 @@
     "agent:verify-persistence": "tsx src/lib/agent/verify-persistence.ts",
     "agent:verify-local-db": "tsx src/lib/agent/verify-local-db.ts",
     "agent:verify-real-folder": "tsx src/lib/agent/verify-real-folder.ts",
-    "agent:verify-run-python": "tsx src/lib/wasm/verify-run-python.ts"
+    "agent:verify-run-python": "tsx src/lib/wasm/verify-run-python.ts",
+    "agent:verify-run-python-tool": "tsx src/lib/agent/tools/verify-run-python-tool.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.31",
