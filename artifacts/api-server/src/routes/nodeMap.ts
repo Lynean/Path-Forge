@@ -32,6 +32,7 @@ import {
 import { randomUUID } from "node:crypto";
 import { requireAuth, getAuthUserId } from "../lib/auth";
 import { generateNodeMap } from "../lib/aiNodeMap";
+import { readWorkspaceSnapshot } from "../lib/workspaceSnapshot";
 import { streamVisualization } from "../lib/aiVisualize";
 import { createAgentRuntime, resolveAgentRuntimeKind } from "../lib/agent";
 import { DbRunRecorder } from "../lib/agent/db-run-recorder";
@@ -545,9 +546,16 @@ router.post("/projects/:projectId/generate-map", requireAuth, async (req, res): 
 
   const [profile] = await db.select().from(learnerProfilesTable).where(eq(learnerProfilesTable.clerkUserId, userId));
 
+  // Ground the plan in the learner's real local project folder when attached.
+  const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
+    .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
+  const projectSnapshot = attachedWorkspace?.path
+    ? await readWorkspaceSnapshot(attachedWorkspace.path).catch(() => null)
+    : null;
+
   let aiResult;
   try {
-    aiResult = await generateNodeMap(project, profile ?? null);
+    aiResult = await generateNodeMap(project, profile ?? null, projectSnapshot);
   } catch (err: any) {
     res.status(500).json({ error: `AI generation failed: ${err?.message ?? "Unknown error"}` });
     return;

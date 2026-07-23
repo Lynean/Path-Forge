@@ -320,7 +320,8 @@ Respond ONLY with valid JSON, no markdown:
 
 export async function generateNodeMap(
   project: { title: string; ideaPrompt: string },
-  profile: LearnerProfile | null
+  profile: LearnerProfile | null,
+  projectSnapshot?: string | null
 ): Promise<AINodeMapResponse> {
   const projectTypes = detectProjectTypes(`${project.title} ${project.ideaPrompt}`);
   const projectTypeRules = buildMapProjectTypeRules(projectTypes);
@@ -389,8 +390,12 @@ Respond ONLY with valid JSON matching this exact schema, no markdown:
   ]
 }`;
 
+  const snapshotBlock = projectSnapshot
+    ? `\n\nThe learner has attached their REAL local project folder — it already exists on disk. Ground the plan in it: build ON TOP of what is already there, SKIP nodes for anything already implemented, scaffolded, or configured, and prefer nodes that inspect/extend/verify the existing code over recreating it from scratch. If the existing setup conflicts with the described idea, add an early node to reconcile them. Existing project snapshot:\n${projectSnapshot}`
+    : "";
+
   const userPrompt = `Project: "${project.title}"
-Description: ${project.ideaPrompt}
+Description: ${project.ideaPrompt}${snapshotBlock}
 
 Generate the learning node map for this project.`;
 
