@@ -1,3 +1,6 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
@@ -77,5 +80,25 @@ if (!isLocalMode) {
 }
 
 app.use("/api", router);
+
+// Fully-local / packaged app: serve the bundled SPA from this same origin so the
+// UI's relative `/api` calls need no dev proxy and no configured API base. Cloud
+// deploys serve the UI separately (Vercel) and ship no `dist/public`, so this
+// whole block no-ops there. Path is overridable for the packaged layout.
+const appDist =
+  process.env.PATHFORGE_APP_DIST ??
+  path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../app/dist/public");
+
+if (existsSync(path.join(appDist, "index.html"))) {
+  app.use(express.static(appDist));
+  // SPA fallback: any non-API GET returns index.html so client-side routing works
+  // on deep links / refresh. `/api` and `/clerk` are handled above and skipped here.
+  app.use((req, res, next) => {
+    if (req.method !== "GET" && req.method !== "HEAD") return next();
+    if (req.path.startsWith("/api/") || req.path.startsWith("/clerk")) return next();
+    res.sendFile(path.join(appDist, "index.html"));
+  });
+  logger.info({ appDist }, "Serving bundled UI (same-origin)");
+}
 
 export default app;
