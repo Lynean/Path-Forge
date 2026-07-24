@@ -54,3 +54,10 @@ Thumbs.db
 # Environment secrets
 .env
 .env.local
+
+# Snake live-test demo workspace
+/demo/
+
+# Electron packaging outputs
+artifacts/agent-desktop/pkg/
+artifacts/agent-desktop/release/

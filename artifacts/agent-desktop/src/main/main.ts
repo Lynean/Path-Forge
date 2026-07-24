@@ -714,19 +714,29 @@ async function waitForBackend(port: number, timeoutMs = 30_000): Promise<void> {
 async function startPathforgeBackend(): Promise<void> {
   if (backendProcess) return;
   const port = pathforgeBackendPort();
+  // Packaged builds ship the backend, migrations and built SPA as extraResources
+  // under process.resourcesPath/{backend,migrations,app-public} (see build-package.mjs
+  // + electron-builder config). Dev uses the monorepo layout. All overridable by env.
+  const packaged = app.isPackaged;
+  const res = process.resourcesPath;
   const backendEntry =
     process.env["PATHFORGE_BACKEND_ENTRY"]?.trim() ||
-    join(__dirname, "..", "..", "api-server", "dist", "index.mjs");
+    (packaged
+      ? join(res, "backend", "index.mjs")
+      : join(__dirname, "..", "..", "api-server", "dist", "index.mjs"));
   const migrationsDir =
     process.env["PATHFORGE_MIGRATIONS_DIR"]?.trim() ||
-    join(__dirname, "..", "..", "..", "lib", "db", "drizzle");
+    (packaged
+      ? join(res, "migrations")
+      : join(__dirname, "..", "..", "..", "lib", "db", "drizzle"));
   const localDb =
     process.env["PATHFORGE_LOCAL_DB"]?.trim() || join(app.getPath("userData"), "pathforge-db");
-  // The backend serves this built SPA at its own origin (see app.ts). Dev layout:
-  // artifacts/app/dist/public; overridable for the packaged resource layout.
+  // The backend serves this built SPA at its own origin (see app.ts).
   const appDist =
     process.env["PATHFORGE_APP_DIST"]?.trim() ||
-    join(__dirname, "..", "..", "app", "dist", "public");
+    (packaged
+      ? join(res, "app-public")
+      : join(__dirname, "..", "..", "app", "dist", "public"));
   const apiKey = await resolveOpenRouterApiKey();
 
   backendProcess = spawn(process.execPath, [backendEntry], {

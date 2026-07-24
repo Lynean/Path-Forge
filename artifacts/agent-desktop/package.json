@@ -9,7 +9,41 @@
     "dev": "pnpm run build && electron .",
     "eval": "tsx ./src/evals/run-suite.ts",
     "eval:docker-ui": "tsx ./src/evals/run-docker-ui-suite.ts",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "stage-package": "node ./build-package.mjs",
+    "package:dir": "pnpm run build && pnpm run stage-package && electron-builder --dir"
+  },
+  "build": {
+    "appId": "tech.forgepath.pathforge",
+    "productName": "PathForge",
+    "directories": {
+      "output": "release"
+    },
+    "afterPack": "./afterPack.cjs",
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "pkg/backend",
+        "to": "backend",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "pkg/app-public",
+        "to": "app-public",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "pkg/migrations",
+        "to": "migrations",
+        "filter": ["**/*"]
+      }
+    ],
+    "win": {
+      "target": "dir"
+    }
   },
   "dependencies": {
     "@workspace/agent-runtime": "workspace:*",
@@ -24,6 +58,7 @@
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
     "electron": "43.1.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "0.27.3",
     "tsx": "catalog:",
     "typescript": "~5.9.3",
