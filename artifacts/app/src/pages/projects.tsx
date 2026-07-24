@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useOptionalUser } from "@/lib/useOptionalUser";
-import { useListProjects, useCreateProject, useDeleteProject, getListProjectsQueryKey } from "@workspace/api-client-react";
+import { useListProjects, useCreateProject, useDeleteProject, useGetProjectStats, getListProjectsQueryKey } from "@workspace/api-client-react";
+import { ImportProjectButton, ExportProjectButton } from "@/components/project-share";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +41,21 @@ function buildEnrichedPrompt(
   if (answered.length === 0) return base;
   const lines = answered.map((q) => `- ${q.question}: ${answers[q.id]}`).join("\n");
   return `${base}\n\nProject framing:\n${lines}`;
+}
+
+// Real per-project progress from the stats endpoint (replaces the old hardcoded --%).
+function ProjectProgress({ projectId }: { projectId: number }) {
+  const { data } = useGetProjectStats(projectId);
+  const pct = data?.progressPercent ?? 0;
+  return (
+    <div className="space-y-2 mt-auto">
+      <div className="flex justify-between text-xs text-muted-foreground">
+        <span>Progress</span>
+        <span>{data ? `${pct}%` : "…"}</span>
+      </div>
+      <Progress value={pct} className="h-1" />
+    </div>
+  );
 }
 
 export default function Projects() {
@@ -156,6 +172,8 @@ export default function Projects() {
               Pick up where you left off, or start something new — every project builds you a personalized, step-by-step path.
             </p>
           </div>
+          <div className="flex items-center gap-2 shrink-0">
+          <ImportProjectButton />
           <Dialog open={open} onOpenChange={handleOpenChange}>
             <DialogTrigger asChild>
               <Button size="lg" className="shrink-0 shadow-lg shadow-primary/20">
@@ -349,6 +367,7 @@ export default function Projects() {
 
           </DialogContent>
           </Dialog>
+          </div>
         </div>
       </div>
 
@@ -396,6 +415,7 @@ export default function Projects() {
                     >
                       {project.status}
                     </Badge>
+                    <ExportProjectButton projectId={project.id} title={project.title} />
                     <Button
                       variant="ghost"
                       size="sm"
@@ -421,13 +441,7 @@ export default function Projects() {
                 </TooltipProvider>
               </CardHeader>
               <CardContent className="flex-1">
-                <div className="space-y-2 mt-auto">
-                  <div className="flex justify-between text-xs text-muted-foreground">
-                    <span>Progress</span>
-                    <span>--%</span>
-                  </div>
-                  <Progress value={0} className="h-1" />
-                </div>
+                <ProjectProgress projectId={project.id} />
               </CardContent>
               <CardFooter>
                 <Button

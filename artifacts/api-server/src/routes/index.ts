@@ -8,12 +8,14 @@ import projectWorkspaceRouter from "./projectWorkspace";
 import projectEnvironmentRouter from "./projectEnvironment";
 import runtimeRouter from "./runtime";
 import settingsRouter from "./settings";
+import projectShareRouter from "./projectShare";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
 router.use(profileRouter);
 router.use(nodeMapRouter);
+router.use(projectShareRouter);
 router.use(projectsRouter);
 router.use(agentRunsRouter);
 router.use(projectWorkspaceRouter);
