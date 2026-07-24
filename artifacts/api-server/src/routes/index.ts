@@ -7,6 +7,7 @@ import agentRunsRouter from "./agentRuns";
 import projectWorkspaceRouter from "./projectWorkspace";
 import projectEnvironmentRouter from "./projectEnvironment";
 import runtimeRouter from "./runtime";
+import settingsRouter from "./settings";
 
 const router: IRouter = Router();
 
@@ -18,5 +19,6 @@ router.use(agentRunsRouter);
 router.use(projectWorkspaceRouter);
 router.use(projectEnvironmentRouter);
 router.use(runtimeRouter);
+router.use(settingsRouter);
 
 export default router;

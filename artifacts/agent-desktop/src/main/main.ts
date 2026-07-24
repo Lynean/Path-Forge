@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { request as httpRequest } from "node:http";
 import { basename, join } from "node:path";
 import {
@@ -33,7 +33,7 @@ import {
   type DockerSandboxOptions,
   type ModelAdapter,
 } from "@workspace/agent-runtime";
-import { app, BrowserWindow, dialog, ipcMain, type IpcMainInvokeEvent } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, safeStorage, type IpcMainInvokeEvent } from "electron";
 import OpenAI from "openai";
 import {
   desktopRunRequestSchema,
@@ -41,6 +41,7 @@ import {
   type DesktopRunRequest,
   type DesktopRunResult,
   type ConversationState,
+  type OpenRouterKeyStatus,
   type RuntimeStatus,
   type WorkspaceSelection,
 } from "../shared/contracts";
@@ -137,6 +138,92 @@ async function resolveOpenRouterApiKey(): Promise<string | null> {
     }
   }
   return null;
+}
+
+// --- BYO OpenRouter key ---------------------------------------------------
+// The user's own key, entered in the app. The MAIN process owns it: persisted
+// encrypted-at-rest (Electron safeStorage) in userData, decrypted only here, and
+// pushed to the local backend over loopback. It is never stored in the renderer.
+
+function openRouterKeyFile(): string {
+  return join(app.getPath("userData"), "openrouter.key.enc");
+}
+
+async function readStoredOpenRouterKey(): Promise<string | null> {
+  if (!safeStorage.isEncryptionAvailable()) return null;
+  try {
+    const encrypted = await readFile(openRouterKeyFile());
+    return safeStorage.decryptString(encrypted).trim() || null;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    console.error("Failed to read stored OpenRouter key:", error);
+    return null;
+  }
+}
+
+async function writeStoredOpenRouterKey(key: string): Promise<void> {
+  // If OS encryption is unavailable, keep the key session-only (pushed to the
+  // backend) rather than writing it in plaintext.
+  if (!safeStorage.isEncryptionAvailable()) return;
+  await writeFile(openRouterKeyFile(), safeStorage.encryptString(key));
+}
+
+async function clearStoredOpenRouterKey(): Promise<void> {
+  await unlink(openRouterKeyFile()).catch(() => {});
+}
+
+function backendSettingsUrl(): string {
+  return `http://127.0.0.1:${pathforgeBackendPort()}/api/settings/openrouter`;
+}
+
+async function pushOpenRouterKeyToBackend(key: string | null): Promise<void> {
+  try {
+    if (key) {
+      await fetch(backendSettingsUrl(), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: key }),
+      });
+    } else {
+      await fetch(backendSettingsUrl(), { method: "DELETE" });
+    }
+  } catch (error) {
+    console.error("Failed to push OpenRouter key to backend:", error);
+  }
+}
+
+async function backendOpenRouterConfigured(): Promise<boolean> {
+  try {
+    const res = await fetch(backendSettingsUrl());
+    const json = (await res.json()) as { configured?: boolean };
+    return Boolean(json.configured);
+  } catch {
+    return false;
+  }
+}
+
+async function getOpenRouterStatus(event: IpcMainInvokeEvent): Promise<OpenRouterKeyStatus> {
+  assertTrustedSender(event);
+  return { configured: await backendOpenRouterConfigured() };
+}
+
+async function setOpenRouterKey(
+  event: IpcMainInvokeEvent,
+  rawKey: unknown,
+): Promise<OpenRouterKeyStatus> {
+  assertTrustedSender(event);
+  const key = typeof rawKey === "string" ? rawKey.trim() : "";
+  if (!key) throw new Error("API key must not be empty");
+  await writeStoredOpenRouterKey(key);
+  await pushOpenRouterKeyToBackend(key);
+  return { configured: await backendOpenRouterConfigured() };
+}
+
+async function clearOpenRouterKey(event: IpcMainInvokeEvent): Promise<OpenRouterKeyStatus> {
+  assertTrustedSender(event);
+  await clearStoredOpenRouterKey();
+  await pushOpenRouterKeyToBackend(null);
+  return { configured: await backendOpenRouterConfigured() };
 }
 
 function createOpenRouterGateway(apiKey: string): CompletionGateway {
@@ -737,7 +824,9 @@ async function startPathforgeBackend(): Promise<void> {
     (packaged
       ? join(res, "app-public")
       : join(__dirname, "..", "..", "app", "dist", "public"));
-  const apiKey = await resolveOpenRouterApiKey();
+  // Prefer the user's stored BYO key; fall back to env/.env (dev). When neither
+  // exists the backend boots keyless and the user adds a key in Settings.
+  const apiKey = (await readStoredOpenRouterKey()) ?? (await resolveOpenRouterApiKey());
 
   backendProcess = spawn(process.execPath, [backendEntry], {
     env: {
@@ -768,6 +857,9 @@ function stopPathforgeBackend(): void {
 app.whenReady().then(async () => {
   ipcMain.handle("agent-desktop:select-workspace", selectWorkspace);
   ipcMain.handle("agent-desktop:get-runtime-status", getRuntimeStatus);
+  ipcMain.handle("agent-desktop:get-openrouter-status", getOpenRouterStatus);
+  ipcMain.handle("agent-desktop:set-openrouter-key", setOpenRouterKey);
+  ipcMain.handle("agent-desktop:clear-openrouter-key", clearOpenRouterKey);
   ipcMain.handle("agent-desktop:get-conversation", getConversation);
   ipcMain.handle("agent-desktop:clear-conversation", clearConversation);
   ipcMain.handle("agent-desktop:clear-dependency-cache", clearDependencyCache);

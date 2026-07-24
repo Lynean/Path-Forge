@@ -8,6 +8,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { LANGUAGE_OPTIONS } from "@/lib/profile-questions";
+import { isLocalMode } from "@/lib/localMode";
+import { OpenRouterKeySettings } from "@/components/openrouter-key-settings";
 
 export default function Profile() {
   const { data: profile, isLoading } = useGetProfile();
@@ -131,6 +133,8 @@ export default function Profile() {
           </Button>
         </div>
       </form>
+
+      {isLocalMode && <OpenRouterKeySettings />}
     </div>
   );
 }

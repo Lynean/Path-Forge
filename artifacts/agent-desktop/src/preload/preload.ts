@@ -7,6 +7,7 @@ import type {
   DesktopRunRequest,
   DesktopRunEvent,
   DesktopRunResult,
+  OpenRouterKeyStatus,
   RuntimeStatus,
   WorkspaceSelection,
 } from "../shared/contracts";
@@ -16,6 +17,12 @@ const api: AgentDesktopApi = {
     ipcRenderer.invoke("agent-desktop:select-workspace") as Promise<WorkspaceSelection | null>,
   getRuntimeStatus: () =>
     ipcRenderer.invoke("agent-desktop:get-runtime-status") as Promise<RuntimeStatus>,
+  getOpenRouterStatus: () =>
+    ipcRenderer.invoke("agent-desktop:get-openrouter-status") as Promise<OpenRouterKeyStatus>,
+  setOpenRouterKey: (apiKey: string) =>
+    ipcRenderer.invoke("agent-desktop:set-openrouter-key", apiKey) as Promise<OpenRouterKeyStatus>,
+  clearOpenRouterKey: () =>
+    ipcRenderer.invoke("agent-desktop:clear-openrouter-key") as Promise<OpenRouterKeyStatus>,
   getConversation: () =>
     ipcRenderer.invoke("agent-desktop:get-conversation") as Promise<ConversationState>,
   clearConversation: () =>

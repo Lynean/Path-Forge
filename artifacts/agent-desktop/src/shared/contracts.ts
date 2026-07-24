@@ -51,9 +51,18 @@ export interface DesktopRunEvent {
   event: AgentEvent;
 }
 
+export interface OpenRouterKeyStatus {
+  configured: boolean;
+}
+
 export interface AgentDesktopApi {
   selectWorkspace(): Promise<WorkspaceSelection | null>;
   getRuntimeStatus(): Promise<RuntimeStatus>;
+  // BYO OpenRouter key: the main process persists it (encrypted, safeStorage) and
+  // pushes it to the local backend; the key never persists in the renderer.
+  getOpenRouterStatus(): Promise<OpenRouterKeyStatus>;
+  setOpenRouterKey(apiKey: string): Promise<OpenRouterKeyStatus>;
+  clearOpenRouterKey(): Promise<OpenRouterKeyStatus>;
   getConversation(): Promise<ConversationState>;
   clearConversation(): Promise<ConversationState>;
   clearDependencyCache(): Promise<RuntimeStatus>;
