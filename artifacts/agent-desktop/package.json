@@ -10,8 +10,10 @@
     "eval": "tsx ./src/evals/run-suite.ts",
     "eval:docker-ui": "tsx ./src/evals/run-docker-ui-suite.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "gen-icon": "node ./gen-icon.mjs",
     "stage-package": "node ./build-package.mjs",
-    "package:dir": "pnpm run build && pnpm run stage-package && electron-builder --dir"
+    "package:dir": "pnpm run build && pnpm run stage-package && electron-builder --dir",
+    "package": "pnpm run build && pnpm run stage-package && electron-builder"
   },
   "build": {
     "appId": "tech.forgepath.pathforge",
@@ -42,7 +44,13 @@
       }
     ],
     "win": {
-      "target": "dir"
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
     }
   },
   "dependencies": {
