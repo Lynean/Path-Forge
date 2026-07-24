@@ -634,14 +634,18 @@ function createWindow(): void {
       }
     });
   }
-  // Desktop-host mode: when PATHFORGE_APP_URL is set (e.g. the PathForge web app
-  // at http://localhost:3000), host that UI in the shell so it gains local
-  // workspace + sandbox access via the exposed `agentDesktop` bridge. Otherwise
-  // load the bundled lab renderer (the verified default). The smoke-test flags
-  // above never set PATHFORGE_APP_URL, so those journeys are unaffected.
-  const pathforgeAppUrl = process.env["PATHFORGE_APP_URL"]?.trim();
-  if (pathforgeAppUrl) {
-    void mainWindow.loadURL(pathforgeAppUrl);
+  // How the shell picks what to display (see pathforgeHostMode):
+  //  - "dev-url": PATHFORGE_APP_URL set (Vite dev server) → load that URL.
+  //  - "served" : packaged app / PATHFORGE_SERVE_UI=1 → the backend serves the
+  //               built UI, so load the backend's own origin (same-origin /api).
+  //  - "lab"    : the bundled agent-lab renderer (the verified default).
+  // The smoke-test flags above use "lab" (they set neither URL nor SERVE_UI),
+  // so those journeys are unaffected.
+  const hostMode = pathforgeHostMode();
+  if (hostMode === "dev-url") {
+    void mainWindow.loadURL(process.env["PATHFORGE_APP_URL"]!.trim());
+  } else if (hostMode === "served") {
+    void mainWindow.loadURL(`http://127.0.0.1:${pathforgeBackendPort()}/`);
   } else {
     void mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
   }
@@ -659,6 +663,20 @@ function createWindow(): void {
 
 function pathforgeBackendPort(): number {
   return Number(process.env["PATHFORGE_BACKEND_PORT"]?.trim() || "5000");
+}
+
+type HostMode = "dev-url" | "served" | "lab";
+
+/**
+ * Decides what the shell window shows. A packaged build (or PATHFORGE_SERVE_UI=1
+ * for dev testing) runs "served" mode: the spawned backend serves the built UI,
+ * so the window loads the backend origin. PATHFORGE_APP_URL keeps the dev-server
+ * flow. Neither → the bundled lab renderer.
+ */
+function pathforgeHostMode(): HostMode {
+  if (process.env["PATHFORGE_APP_URL"]?.trim()) return "dev-url";
+  if (app.isPackaged || process.env["PATHFORGE_SERVE_UI"]?.trim() === "1") return "served";
+  return "lab";
 }
 
 /** Resolves once the backend answers on its port (any HTTP response = ready). */
@@ -704,6 +722,11 @@ async function startPathforgeBackend(): Promise<void> {
     join(__dirname, "..", "..", "..", "lib", "db", "drizzle");
   const localDb =
     process.env["PATHFORGE_LOCAL_DB"]?.trim() || join(app.getPath("userData"), "pathforge-db");
+  // The backend serves this built SPA at its own origin (see app.ts). Dev layout:
+  // artifacts/app/dist/public; overridable for the packaged resource layout.
+  const appDist =
+    process.env["PATHFORGE_APP_DIST"]?.trim() ||
+    join(__dirname, "..", "..", "app", "dist", "public");
   const apiKey = await resolveOpenRouterApiKey();
 
   backendProcess = spawn(process.execPath, [backendEntry], {
@@ -714,6 +737,7 @@ async function startPathforgeBackend(): Promise<void> {
       PATHFORGE_LOCAL_MODE: "1",
       PATHFORGE_LOCAL_DB: localDb,
       PATHFORGE_MIGRATIONS_DIR: migrationsDir,
+      PATHFORGE_APP_DIST: appDist,
       ...(apiKey ? { OPENROUTER_API_KEY: apiKey } : {}),
     },
     stdio: "inherit",
@@ -740,9 +764,10 @@ app.whenReady().then(async () => {
   ipcMain.handle("agent-desktop:run-turn", runTurn);
   ipcMain.handle("agent-desktop:cancel-run", cancelRun);
 
-  // When hosting the PathForge UI, run its backend in-process so the user only
-  // launches one app. (The bundled lab renderer path spawns nothing.)
-  if (process.env["PATHFORGE_APP_URL"]?.trim()) {
+  // When hosting the PathForge UI (dev-url or served), run its backend as a
+  // managed child so the user launches only one app. The bundled lab renderer
+  // ("lab" mode) spawns nothing.
+  if (pathforgeHostMode() !== "lab") {
     try {
       await startPathforgeBackend();
     } catch (error) {
