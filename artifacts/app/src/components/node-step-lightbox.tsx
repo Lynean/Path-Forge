@@ -100,6 +100,7 @@ interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  tools?: { tool: string; detail?: string }[];
 }
 
 interface NodeStepLightboxProps {
@@ -252,34 +253,59 @@ function SlideDots({ total, current }: { total: number; current: number }) {
   );
 }
 
+// A small amber note listing the tools the tutor agent used. Shown live during a
+// turn and persisted with the assistant message so it stays visible on reload.
+function ToolActivity({ tools }: { tools: { tool: string; detail?: string }[] }) {
+  if (!tools?.length) return null;
+  return (
+    <div className="mx-1 my-1 space-y-0.5 rounded-lg border border-amber-400/40 bg-amber-300/15 px-3 py-2 text-[11px] text-amber-700 backdrop-blur-sm dark:text-amber-200/90">
+      {tools.map((t, i) => (
+        <div key={i} className="flex items-center gap-1.5">
+          <Wrench className="h-3 w-3 shrink-0" />
+          <span className="font-mono">
+            {TOOL_LABELS[t.tool] ?? t.tool}
+            {t.detail ? <span className="opacity-70">: {t.detail}</span> : null}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
   // Legacy-data defense only — new messages never contain these (see MarkdownContent).
   const displayContent = message.content.replace(/\[STEP_DONE:\d+\]/g, "").trim();
+  const tools = !isUser ? message.tools ?? [] : [];
 
-  if (!displayContent) return null;
+  if (!displayContent && tools.length === 0) return null;
 
   return (
-    <div className={cn("flex gap-2", isUser ? "justify-end" : "justify-start")}>
-      {!isUser && (
-        <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-1">
-          <Sparkles className="w-2.5 h-2.5 text-primary" />
+    <div className={cn("flex flex-col gap-1", isUser ? "items-end" : "items-stretch")}>
+      {tools.length > 0 && <ToolActivity tools={tools} />}
+      {displayContent && (
+        <div className={cn("flex gap-2", isUser ? "justify-end" : "justify-start")}>
+          {!isUser && (
+            <div className="w-5 h-5 rounded-full bg-primary/20 flex items-center justify-center shrink-0 mt-1">
+              <Sparkles className="w-2.5 h-2.5 text-primary" />
+            </div>
+          )}
+          <div
+            className={cn(
+              "max-w-[88%] rounded-2xl px-3 py-2 text-sm",
+              isUser
+                ? "bg-primary text-primary-foreground rounded-br-sm"
+                : "bg-secondary text-secondary-foreground rounded-bl-sm"
+            )}
+          >
+            {isUser ? (
+              <p className="whitespace-pre-wrap text-sm leading-relaxed">{displayContent}</p>
+            ) : (
+              <MarkdownContent content={displayContent} />
+            )}
+          </div>
         </div>
       )}
-      <div
-        className={cn(
-          "max-w-[88%] rounded-2xl px-3 py-2 text-sm",
-          isUser
-            ? "bg-primary text-primary-foreground rounded-br-sm"
-            : "bg-secondary text-secondary-foreground rounded-bl-sm"
-        )}
-      >
-        {isUser ? (
-          <p className="whitespace-pre-wrap text-sm leading-relaxed">{displayContent}</p>
-        ) : (
-          <MarkdownContent content={displayContent} />
-        )}
-      </div>
     </div>
   );
 }
@@ -657,6 +683,9 @@ export function NodeStepLightbox({
     setIsChatStreaming(true);
     setChatStreamingContent("");
     setToolsUsed([]);
+    // Local copy of surfaced tools — state is stale inside this async closure, so
+    // we accumulate here to attach onto the finalized assistant message.
+    const surfacedTools: { tool: string; detail?: string }[] = [];
 
     chatAbortRef.current = new AbortController();
 
@@ -694,10 +723,9 @@ export function NodeStepLightbox({
                 fullResponse += parsed.content;
                 setChatStreamingContent(extractChatDisplay(fullResponse));
               } else if (parsed.type === "tool_used") {
-                setToolsUsed((prev) => [
-                  ...prev,
-                  { tool: String(parsed.tool), detail: typeof parsed.detail === "string" ? parsed.detail : undefined },
-                ]);
+                const t = { tool: String(parsed.tool), detail: typeof parsed.detail === "string" ? parsed.detail : undefined };
+                surfacedTools.push(t);
+                setToolsUsed((prev) => [...prev, t]);
               } else if (parsed.type === "environment_proposed" && parsed.proposal) {
                 setEnvProposal(parsed.proposal as EnvProposal);
                 setEnvApproved(false);
@@ -775,6 +803,7 @@ export function NodeStepLightbox({
         role: "assistant",
         content: resolvedContent !== null ? resolvedContent : extractChatDisplay(fullResponse),
         createdAt: new Date().toISOString(),
+        ...(surfacedTools.length ? { tools: surfacedTools } : {}),
       };
       setChatMessages((prev) =>
         planUpdateFailed
@@ -1349,19 +1378,7 @@ export function NodeStepLightbox({
                       }
                       return <MessageBubble key={i} message={msg} />;
                     })}
-                    {isChatStreaming && toolsUsed.length > 0 && (
-                      <div className="mx-1 my-1 space-y-0.5 rounded-lg border border-amber-400/40 bg-amber-300/15 px-3 py-2 text-[11px] text-amber-700 backdrop-blur-sm dark:text-amber-200/90">
-                        {toolsUsed.map((t, i) => (
-                          <div key={i} className="flex items-center gap-1.5">
-                            <Wrench className="h-3 w-3 shrink-0" />
-                            <span className="font-mono">
-                              {TOOL_LABELS[t.tool] ?? t.tool}
-                              {t.detail ? <span className="opacity-70">: {t.detail}</span> : null}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+                    {isChatStreaming && toolsUsed.length > 0 && <ToolActivity tools={toolsUsed} />}
                     {isChatStreaming && chatStreamingContent && (
                       <MessageBubble
                         message={{ role: "assistant", content: chatStreamingContent, createdAt: new Date().toISOString() }}

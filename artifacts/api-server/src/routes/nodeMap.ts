@@ -878,6 +878,9 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
       : [];
 
     let toolCalls: ChatToolCall[] = [];
+    // Each tool the tutor surfaced this turn (same items streamed as tool_used),
+    // collected so they can be persisted onto the assistant message.
+    const surfacedTools: { tool: string; detail?: string }[] = [];
 
     const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
       .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
@@ -933,6 +936,7 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
             : typeof args?.query === "string" ? args.query
             : typeof args?.title === "string" ? args.title
             : undefined;
+          surfacedTools.push({ tool: event.tool, ...(detail ? { detail } : {}) });
           res.write(`data: ${JSON.stringify({ type: "tool_used", tool: event.tool, detail })}\n\n`);
         } else if (event.type === "tool_completed") {
           toolCalls.push({ name: event.tool as ChatToolCall["name"], args: event.output as Record<string, unknown> });
@@ -963,7 +967,12 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
 
     const displayContent = fullContent.trim() || synthesizeActionSummary(toolCalls);
     const userMsg: ChatMessage = { role: "user", content: body.data.content, createdAt: new Date().toISOString() };
-    const assistantMsg: ChatMessage = { role: "assistant", content: displayContent, createdAt: new Date().toISOString() };
+    const assistantMsg: ChatMessage = {
+      role: "assistant",
+      content: displayContent,
+      createdAt: new Date().toISOString(),
+      ...(surfacedTools.length ? { tools: surfacedTools } : {}),
+    };
 
     // Append onto the freshest row state under a lock (not the possibly-stale `history`
     // read before the AI stream started), so a concurrent write from another tab/request

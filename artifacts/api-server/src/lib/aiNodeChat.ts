@@ -32,6 +32,9 @@ export interface ChatMessage {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  // Tools the tutor agent surfaced while producing this message — shown to the
+  // learner and persisted so they remain visible on reload.
+  tools?: { tool: string; detail?: string }[];
 }
 
 interface MapContext {

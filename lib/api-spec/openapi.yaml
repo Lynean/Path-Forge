@@ -999,6 +999,18 @@ components:
           type: string
         createdAt:
           type: string
+        tools:
+          description: Tools the tutor agent used to produce this message (shown + persisted in the chat).
+          type: array
+          items:
+            type: object
+            properties:
+              tool:
+                type: string
+              detail:
+                type: string
+            required:
+              - tool
       required:
         - role
         - content

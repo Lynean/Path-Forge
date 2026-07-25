@@ -6,9 +6,12 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { NodeChatMessageRole } from './nodeChatMessageRole';
+import type { NodeChatMessageToolsItem } from './nodeChatMessageToolsItem';
 
 export interface NodeChatMessage {
   role: NodeChatMessageRole;
   content: string;
   createdAt: string;
+  /** Tools the tutor agent used to produce this message (shown + persisted in the chat). */
+  tools?: NodeChatMessageToolsItem[];
 }

@@ -20,6 +20,7 @@ export * from './nodeChatHistory';
 export * from './nodeChatMessage';
 export * from './nodeChatMessageInput';
 export * from './nodeChatMessageRole';
+export * from './nodeChatMessageToolsItem';
 export * from './nodeEdge';
 export * from './nodeMap';
 export * from './nodeStatus';

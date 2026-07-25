@@ -311,7 +311,11 @@ export const GetNodeChatResponse = zod.object({
   "messages": zod.array(zod.object({
   "role": zod.enum(['user', 'assistant']),
   "content": zod.string(),
-  "createdAt": zod.string()
+  "createdAt": zod.string(),
+  "tools": zod.array(zod.object({
+  "tool": zod.string(),
+  "detail": zod.string().optional()
+})).optional().describe('Tools the tutor agent used to produce this message (shown + persisted in the chat).')
 }))
 })
 

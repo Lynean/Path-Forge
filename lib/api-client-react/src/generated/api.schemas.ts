@@ -189,10 +189,17 @@ export const NodeChatMessageRole = {
   assistant: 'assistant',
 } as const;
 
+export type NodeChatMessageToolsItem = {
+  tool: string;
+  detail?: string;
+};
+
 export interface NodeChatMessage {
   role: NodeChatMessageRole;
   content: string;
   createdAt: string;
+  /** Tools the tutor agent used to produce this message (shown + persisted in the chat). */
+  tools?: NodeChatMessageToolsItem[];
 }
 
 export interface NodeChatHistory {
