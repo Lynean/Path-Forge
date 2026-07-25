@@ -47,6 +47,14 @@ import {
 } from "../shared/contracts";
 import { ConversationStore } from "./conversation-store";
 
+// Fix the app identity BEFORE any getPath("userData") call. Without this,
+// app.getName() returns the workspace package name ("@workspace/agent-desktop"),
+// so the embedded DB, stored key and conversations land in
+// AppData/Roaming/@workspace/agent-desktop — a folder shared with dev runs, which
+// leaks old test projects into fresh installs. Pin it to the product name so each
+// install gets a clean, private AppData/Roaming/PathForge.
+app.setName("PathForge");
+
 let mainWindow: BrowserWindow | null = null;
 let backendProcess: ChildProcess | null = null;
 let selectedWorkspace: WorkspaceSelection | null = null;
