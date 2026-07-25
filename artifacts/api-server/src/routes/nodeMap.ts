@@ -31,6 +31,7 @@ import {
 } from "@workspace/api-zod";
 import { randomUUID } from "node:crypto";
 import { requireAuth, getAuthUserId } from "../lib/auth";
+import { isChatOnlyMode } from "../lib/chatOnly";
 import { generateNodeMap } from "../lib/aiNodeMap";
 import { readWorkspaceSnapshot } from "../lib/workspaceSnapshot";
 import { streamVisualization } from "../lib/aiVisualize";
@@ -549,7 +550,7 @@ router.post("/projects/:projectId/generate-map", requireAuth, async (req, res): 
   // Ground the plan in the learner's real local project folder when attached.
   const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
     .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
-  const projectSnapshot = attachedWorkspace?.path
+  const projectSnapshot = (!isChatOnlyMode && attachedWorkspace?.path)
     ? await readWorkspaceSnapshot(attachedWorkspace.path).catch(() => null)
     : null;
 
@@ -777,7 +778,7 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
   // first; its state report grounds the (format-reliable) step writer so steps
   // reflect what the learner has really done and which file to change next.
   let liveInspection: string | undefined;
-  if (attachedWorkspace?.path) {
+  if (!isChatOnlyMode && attachedWorkspace?.path) {
     res.write(`data: ${JSON.stringify({ type: "inspecting" })}\n\n`);
     liveInspection =
       (await inspectProjectState(
@@ -890,8 +891,9 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
     // A project with a real local folder attached must use the harness runtime
     // (the only one that reads folders + runs sandboxes). Otherwise honor the
     // AGENT_RUNTIME flag; unset → the original direct legacy path (unchanged).
-    const runtimeKind = attachedWorkspace?.path ? "harness" : resolveAgentRuntimeKind();
-    const useSeam = Boolean(process.env.AGENT_RUNTIME) || Boolean(attachedWorkspace?.path);
+    // Pure-chat web mode always takes the legacy path — no folder, no tools.
+    const runtimeKind = (!isChatOnlyMode && attachedWorkspace?.path) ? "harness" : resolveAgentRuntimeKind();
+    const useSeam = !isChatOnlyMode && (Boolean(process.env.AGENT_RUNTIME) || Boolean(attachedWorkspace?.path));
 
     if (useSeam) {
       const runtime = createAgentRuntime({

@@ -9,6 +9,7 @@ import projectEnvironmentRouter from "./projectEnvironment";
 import runtimeRouter from "./runtime";
 import settingsRouter from "./settings";
 import projectShareRouter from "./projectShare";
+import { isChatOnlyMode } from "../lib/chatOnly";
 
 const router: IRouter = Router();
 
@@ -18,9 +19,12 @@ router.use(nodeMapRouter);
 router.use(projectShareRouter);
 router.use(projectsRouter);
 router.use(agentRunsRouter);
-router.use(projectWorkspaceRouter);
-router.use(projectEnvironmentRouter);
-router.use(runtimeRouter);
+// Folder/command/Docker/WASM surface — omitted entirely in pure-chat web mode.
+if (!isChatOnlyMode) {
+  router.use(projectWorkspaceRouter);
+  router.use(projectEnvironmentRouter);
+  router.use(runtimeRouter);
+}
 router.use(settingsRouter);
 
 export default router;
