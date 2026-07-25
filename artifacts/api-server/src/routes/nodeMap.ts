@@ -1193,7 +1193,7 @@ router.post("/projects/:projectId/nodes/:nodeId/step-detail", requireAuth, async
 
   const body = GetNodeStepDetailBody.safeParse(req.body);
   if (!body.success) { res.status(400).json({ error: body.error.message }); return; }
-  const { stepIndex, stepTitle, stepBrief } = body.data;
+  const { stepIndex, stepTitle, stepBrief, stepNote } = body.data;
 
   const [project] = await db.select().from(projectsTable)
     .where(and(eq(projectsTable.id, params.data.projectId), eq(projectsTable.clerkUserId, userId)));
@@ -1224,7 +1224,7 @@ router.post("/projects/:projectId/nodes/:nodeId/step-detail", requireAuth, async
   try {
     const stream = streamStepDetail(
       node, project, profile ?? null, mapCtx, codeFiles,
-      stepIndex, stepTitle, stepBrief ?? ""
+      stepIndex, stepTitle, stepBrief ?? "", stepNote
     );
     for await (const chunk of stream) {
       fullContent += chunk;

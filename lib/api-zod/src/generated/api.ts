@@ -365,7 +365,8 @@ export const GetNodeStepDetailParams = zod.object({
 export const GetNodeStepDetailBody = zod.object({
   "stepIndex": zod.number().describe('1-based index of the step within the session plan'),
   "stepTitle": zod.string().min(1),
-  "stepBrief": zod.string().optional()
+  "stepBrief": zod.string().optional(),
+  "stepNote": zod.string().optional().describe('Agent-facing note the overview baked for this step (what earlier steps already did). Stripped from the learner\'s view; used only to ground per-step generation.')
 })
 
 export const GetNodeStepDetailResponse = zod.unknown()

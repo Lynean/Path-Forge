@@ -1070,6 +1070,9 @@ components:
           minLength: 1
         stepBrief:
           type: string
+        stepNote:
+          type: string
+          description: Agent-facing note the overview baked for this step (what earlier steps already did). Stripped from the learner's view; used only to ground per-step generation.
       required:
         - stepIndex
         - stepTitle

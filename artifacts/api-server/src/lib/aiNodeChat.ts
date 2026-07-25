@@ -734,15 +734,19 @@ In 1–3 sentences, state what this session covers end-to-end — what the learn
 **Step Title (short, action-oriented)**
 
 ${isExplainerNode ? "Explain this concept/idea clearly with concrete examples. Build understanding progressively. 3–6 sentences." : "Describe exactly what the learner will do, which command/file/tool is involved, and what outcome to expect. 3–6 sentences."}
+[NOTE: one or two sentences of agent-facing handoff for the writer that later expands THIS step on its own — it will NOT see the other steps. State what earlier steps in this session (and completed prior nodes) have ALREADY set up — the project folder, virtual environment, files, functions — so this step never tells the learner to redo them, and name the exact file/function this step should touch next. Never shown to the learner.]
 
 [SLIDE:2]
 **Step Title**
 
 ...
+[NOTE: ...]
 
 (Continue for all steps — aim for 3–6 steps total. Each step should represent ~5–10 minutes of focused work.)
 
 Each step's title and description must be distinct and specific to what THAT step covers — never reuse or paraphrase another step's wording, and never let a later step just restate step 1.
+SETUP RULE: creating the project folder and the virtual environment each happen in AT MOST ONE step in the whole session, and never in a later step once done. If a previous node already handled the environment/folder (see the completed nodes and the real project state above), do NOT include a folder- or env-creation step here at all — start from the code.
+Every [SLIDE:N] step MUST end with its own [NOTE: ...] line exactly as shown. The note is stripped before the learner sees the step and is the ONLY context the per-step writer gets about what the other steps already did — so it is how you prevent duplicated setup.
 
 ${stepStyleNote}
 
@@ -788,7 +792,11 @@ export async function* streamStepDetail(
   codeFiles: CodeFile[],
   stepIndex: number,
   stepTitle: string,
-  stepBrief: string
+  stepBrief: string,
+  // Agent-facing note the overview baked for THIS step (stripped from the learner's
+  // view): what earlier steps already set up, and the exact file/function to touch
+  // next. It's the per-step writer's only view of what the sibling steps did.
+  stepNote?: string
 ): AsyncGenerator<string> {
   const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, [], codeFiles);
 
@@ -800,16 +808,19 @@ export async function* streamStepDetail(
     ? `\nIMPORTANT: Respond entirely in ${profile.preferredLanguage}. Code, commands, and technical terms may stay in English.`
     : "";
 
-  // Deliberately scoped to ONLY this step's own title/brief (plus the standard rich
-  // system prompt) — no sibling-step context. The title/brief is the single source of
-  // truth for what this page teaches, so a correction made via update_step (which
-  // rewrites title/brief) fully determines the regenerated content on its own, without
-  // depending on a stale view of the rest of the plan.
+  // Scoped to this step's own title/brief plus the overview's baked per-step note.
+  // The note is the ONLY sibling context — it tells the writer what earlier steps
+  // already set up so this page doesn't tell the learner to redo folder/env/file
+  // creation. A correction via update_step rewrites title/brief and still fully
+  // determines the content.
+  const noteSection = stepNote?.trim()
+    ? `\n## What earlier steps already did (do NOT tell the learner to redo any of this)\n${stepNote.trim()}\n`
+    : "";
   const prompt = `You are generating the detailed content page for step ${stepIndex} of the session on "${node.title}".
 
 ## This step
 **${stepTitle}** — ${stepBrief}
-
+${noteSection}
 ## Your task
 Write a detailed, self-contained content page for this step. Structure it as follows:
 
@@ -836,6 +847,7 @@ Rules:
 - Keep every explanation short and concrete — no padding.
 - Code blocks must have correct language tags (\`\`\`bash, \`\`\`ts, etc.).
 - Never repeat content from other steps — stay focused on this step only.
+- If the "What earlier steps already did" section says the folder, virtual environment, or a file already exists, treat it as ALREADY DONE: build on it, never tell the learner to create it again.
 - Use LaTeX math notation ($...$ for inline, $$...$$ for block) for any formulas or equations.${langNote ? `\n${langNote}\n- IMPORTANT: Translate ALL section headings (e.g. "What you'll build", "Sub-steps", "Expected result", "If something goes wrong", "What you'll understand", "The core idea", "Breaking it down", "Worked example", "Common misconception") into the target language. Only code, commands, and technical identifiers stay in English.` : ""}`;
 
   const stream = await openrouter.chat.completions.create({

@@ -235,6 +235,8 @@ export interface StepDetailInput {
   /** @minLength 1 */
   stepTitle: string;
   stepBrief?: string;
+  /** Agent-facing note the overview baked for this step (what earlier steps already did). Stripped from the learner's view; used only to ground per-step generation. */
+  stepNote?: string;
 }
 
 export interface AgentRunSummary {

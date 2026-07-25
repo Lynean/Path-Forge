@@ -92,6 +92,7 @@ interface Slide {
   stepNumber?: number;
   title?: string;
   content: string; // brief/summary from the opening message
+  agentNote?: string; // hidden [NOTE:] handoff for per-step generation (never shown)
   detailedContent?: string | null; // null = not loaded, string = loaded/streaming
   detailLoading?: boolean;
 }
@@ -174,8 +175,14 @@ function parseSlides(content: string): Slide[] {
         if (!isNaN(stepNum)) {
           const titleMatch = body.match(/^\*\*([^*]+)\*\*/);
           const title = titleMatch ? titleMatch[1].trim() : `Step ${stepNum}`;
-          const bodyText = body.replace(/^\*\*[^*]+\*\*\s*\n?/, "").trim();
-          slides.push({ type: "step", stepNumber: stepNum, title, content: bodyText });
+          // Pull out the agent-facing [NOTE: ...] handoff and hide it from the learner.
+          const noteMatch = body.match(/\[NOTE:\s*([\s\S]*?)\]\s*$/i);
+          const agentNote = noteMatch ? noteMatch[1].trim() : undefined;
+          const bodyText = body
+            .replace(/\[NOTE:\s*[\s\S]*?\]\s*$/i, "")
+            .replace(/^\*\*[^*]+\*\*\s*\n?/, "")
+            .trim();
+          slides.push({ type: "step", stepNumber: stepNum, title, content: bodyText, agentNote });
         }
       }
     }
@@ -570,6 +577,7 @@ export function NodeStepLightbox({
           stepIndex: slide.stepNumber ?? slideIdx,
           stepTitle: slide.title ?? "",
           stepBrief: slide.content,
+          ...(slide.agentNote ? { stepNote: slide.agentNote } : {}),
         }),
         signal: stepDetailAbortRef.current.signal,
       });
