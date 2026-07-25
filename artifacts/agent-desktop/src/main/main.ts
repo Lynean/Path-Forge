@@ -845,6 +845,8 @@ async function startPathforgeBackend(): Promise<void> {
       PATHFORGE_LOCAL_DB: localDb,
       PATHFORGE_MIGRATIONS_DIR: migrationsDir,
       PATHFORGE_APP_DIST: appDist,
+      // Persist the tutor's SOUL/USER memory docs in userData (not a temp dir).
+      PATHFORGE_AGENT_HOME: join(app.getPath("userData"), "agent-context"),
       ...(apiKey ? { OPENROUTER_API_KEY: apiKey } : {}),
     },
     stdio: "inherit",

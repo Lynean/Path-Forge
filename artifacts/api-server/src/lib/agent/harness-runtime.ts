@@ -38,6 +38,7 @@ import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
 import { RunPythonTool } from "./tools/run-python-tool";
 import { ProposeEnvironmentTool } from "./tools/propose-environment-tool";
 import { RunInEnvironmentTool } from "./tools/run-in-environment-tool";
+import { UpdateMemoryTool } from "./tools/update-memory-tool";
 
 /** Supplies SOUL/USER/PROJECT context to the harness from in-memory strings. */
 class InlineContextProvider implements AgentContextProvider {
@@ -234,7 +235,9 @@ let agentHomePromise: Promise<string> | null = null;
 async function ensureAgentHome(): Promise<string> {
   if (!agentHomePromise) {
     agentHomePromise = (async () => {
-      const home = join(tmpdir(), "pathforge-agent-home");
+      // Stable location (set by the desktop shell to userData/agent-context) so the
+      // tutor's USER.md persists across sessions; falls back to a temp dir in dev.
+      const home = process.env.PATHFORGE_AGENT_HOME?.trim() || join(tmpdir(), "pathforge-agent-home");
       await mkdir(home, { recursive: true });
       await Promise.all([
         writeIfMissing(
@@ -326,6 +329,10 @@ export class HarnessAgentRuntime implements AgentRuntime {
       // Propose a Docker environment for project types the built-in sandboxes
       // don't cover (recorded/shown only — nothing is built or run).
       new ProposeEnvironmentTool(),
+      // Durable memory the tutor maintains: USER.md (learner facts, in the agent
+      // home) + PROJECT.md (this project's state, in the folder). SOUL.md stays
+      // locked. These are the same docs FileContextProvider feeds back each turn.
+      new UpdateMemoryTool(agentHome, workspaceRoot),
       // PathForge learning-plan proposals (update steps, spawn nodes, …). The
       // harness only proposes; the chat route applies them to Postgres.
       ...createPathforgePlanTools(),
