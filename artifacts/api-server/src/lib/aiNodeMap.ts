@@ -1,5 +1,6 @@
 import { openrouter } from "@workspace/integrations-openrouter-ai";
 import type { LearnerProfile } from "@workspace/db";
+import { PLANNER_SOUL } from "./agent/agentSouls";
 
 const MODEL = "google/gemini-3.1-flash-lite";
 
@@ -348,7 +349,9 @@ export async function generateNodeMap(
     ? `\n- Because the learner has an existing project attached, ALSO give EVERY node an "agent_context": 2–4 sentences of agent-facing guidance (NEVER shown to the learner) that grounds THAT node in the actual project — name the specific existing files/functions/config relevant to this node, tell the tutor what to inspect or run first (e.g. read or run a specific file), and state what this node should build or verify on top of what already exists. This is the planner's handoff so the step generator, which sees only this one node, knows the real project state. Base it on the snapshot, not guesses.`
     : "";
 
-  const systemPrompt = `You are an expert curriculum designer for self-directed learners. Your job is to generate a structured, personalized learning node map (a directed acyclic graph of learning steps) for a given project idea.
+  const systemPrompt = `${PLANNER_SOUL}
+
+You are an expert curriculum designer for self-directed learners. Your job is to generate a structured, personalized learning node map (a directed acyclic graph of learning steps) for a given project idea.
 
 The learner profile is:
 ${profileContext}

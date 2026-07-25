@@ -39,6 +39,7 @@ import { RunPythonTool } from "./tools/run-python-tool";
 import { ProposeEnvironmentTool } from "./tools/propose-environment-tool";
 import { RunInEnvironmentTool } from "./tools/run-in-environment-tool";
 import { UpdateMemoryTool } from "./tools/update-memory-tool";
+import { STEP_WRITER_SOUL, TUTOR_SOUL } from "./agentSouls";
 
 /** Supplies SOUL/USER/PROJECT context to the harness from in-memory strings. */
 class InlineContextProvider implements AgentContextProvider {
@@ -240,10 +241,7 @@ async function ensureAgentHome(): Promise<string> {
       const home = process.env.PATHFORGE_AGENT_HOME?.trim() || join(tmpdir(), "pathforge-agent-home");
       await mkdir(home, { recursive: true });
       await Promise.all([
-        writeIfMissing(
-          join(home, "SOUL.md"),
-          "# PathForge Agent\n\nInspect evidence before making claims. Teach in small, understandable steps.\n",
-        ),
+        writeIfMissing(join(home, "SOUL.md"), `${TUTOR_SOUL}\n`),
         writeIfMissing(
           join(home, "USER.md"),
           "# User\n\nAdd stable learning preferences here as they become known.\n",
@@ -390,8 +388,7 @@ export async function inspectProjectState(
   const workspace = new WorkspaceAccess(workspaceRoot);
   const model = await defaultCreateModel();
 
-  const soul =
-    "Inspect the learner's real project with the read-only tools before reporting. Ground everything in the actual files and current state — which files exist, what is implemented, what is missing. Be precise and concise.";
+  const soul = STEP_WRITER_SOUL;
   const userDoc = profile
     ? [
         profile.educationLevel ? `Education: ${profile.educationLevel}` : null,

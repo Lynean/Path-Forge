@@ -30,7 +30,10 @@ import {
   SpawnExtraNodeResponse,
 } from "@workspace/api-zod";
 import { randomUUID } from "node:crypto";
+import { writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { requireAuth, getAuthUserId } from "../lib/auth";
+import { updateUserDocFromNode } from "../lib/userMemory";
 import { isChatOnlyMode } from "../lib/chatOnly";
 import { generateNodeMap } from "../lib/aiNodeMap";
 import { readWorkspaceSnapshot } from "../lib/workspaceSnapshot";
@@ -666,6 +669,22 @@ router.patch("/projects/:projectId/nodes/:nodeId", requireAuth, async (req, res)
     }
   }
 
+  // Tutor maintains USER.md once per node: on completion, reflect on this node's
+  // conversation and refresh the durable learner memory. Fire-and-forget so it
+  // never blocks the completion response.
+  if (parsed.data.status === "completed") {
+    getOrCreateChatSession(node.id)
+      .then((session) => {
+        const history = (Array.isArray(session.messages) ? session.messages : []) as ChatMessage[];
+        return updateUserDocFromNode({
+          nodeTitle: node.title,
+          messages: history.map((m) => ({ role: m.role, content: m.content })),
+          profileSummary: profileForSummary?.profileSummary ?? null,
+        });
+      })
+      .catch((err) => req.log.warn({ err }, "USER.md update on node completion failed"));
+  }
+
   // Status update, dependent-unlock, and project-completion must apply together —
   // a failure partway through would otherwise leave dependents locked despite their
   // prerequisite showing "completed".
@@ -795,6 +814,16 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
         req.log.warn({ err }, "project inspection for step generation failed");
         return "";
       })) || undefined;
+
+    // Step generator owns PROJECT.md: refresh it once per node-open with the
+    // current project-state report, so it stays the durable project memory the
+    // tutor reads back this session. Best-effort — never block step generation.
+    if (liveInspection) {
+      const doc = `# Project State\n\n_Maintained by the PathForge step generator — updated on opening "${node.title}"._\n\n${liveInspection}\n`;
+      await writeFile(join(attachedWorkspace.path, "PROJECT.md"), doc, "utf8").catch((err) =>
+        req.log.warn({ err }, "writing PROJECT.md failed"),
+      );
+    }
   }
 
   let fullContent = "";
