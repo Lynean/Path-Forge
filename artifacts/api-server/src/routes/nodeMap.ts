@@ -910,7 +910,7 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
     let toolCalls: ChatToolCall[] = [];
     // Each tool the tutor surfaced this turn (same items streamed as tool_used),
     // collected so they can be persisted onto the assistant message.
-    const surfacedTools: { tool: string; detail?: string }[] = [];
+    let surfacedTools: { tool: string; detail?: string }[] = [];
 
     const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
       .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
@@ -924,6 +924,12 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
     const runtimeKind = (!isChatOnlyMode && attachedWorkspace?.path) ? "harness" : resolveAgentRuntimeKind();
     const useSeam = !isChatOnlyMode && (Boolean(process.env.AGENT_RUNTIME) || Boolean(attachedWorkspace?.path));
 
+    // One full streaming attempt. Everything it produces is reset up-front so a
+    // retry can start clean (the client is told to discard the partial text).
+    const runAttempt = async (): Promise<void> => {
+    fullContent = "";
+    toolCalls = [];
+    surfacedTools = [];
     if (useSeam) {
       const runtime = createAgentRuntime({
         kind: runtimeKind,
@@ -994,6 +1000,26 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
         step = await chatGen.next();
       }
       toolCalls = step.value;
+    }
+    };
+
+    // A truncated/overloaded model response used to surface as a dead-end "please
+    // try again" for the learner. Retry it once automatically: the client is sent
+    // a `reset` so it discards the partial text, then the turn is re-run clean.
+    const isRetryableTurnError = (err: unknown): boolean =>
+      /cut off|\(length\)|ended unexpectedly|overloaded|rate.?limit|timed out|429|50\d/i.test(
+        String((err as Error)?.message ?? err),
+      );
+    const MAX_TURN_ATTEMPTS = 2;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        await runAttempt();
+        break;
+      } catch (err) {
+        if (attempt >= MAX_TURN_ATTEMPTS || !isRetryableTurnError(err)) throw err;
+        req.log.warn({ err, attempt }, "chat turn failed, retrying once");
+        res.write(`data: ${JSON.stringify({ type: "reset" })}\n\n`);
+      }
     }
 
     const displayContent = fullContent.trim() || synthesizeActionSummary(toolCalls);

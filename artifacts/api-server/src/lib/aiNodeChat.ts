@@ -59,6 +59,36 @@ function extractMinistepsFromHistory(history: ChatMessage[]): string[] {
   return steps.length >= 2 ? steps : [];
 }
 
+/**
+ * The step pages the learner is actually reading are stripped from the tutor's
+ * history (they run thousands of tokens each — see isInternalHistoryMessage), so
+ * the tutor never saw the code it told the learner to write and would re-derive
+ * different names. This pulls out ONLY the fenced code cells from those step
+ * pages (plus the plan's own snippets) — the cheap part — so the tutor can reuse
+ * the exact identifiers the steps established.
+ */
+export function extractStepCodeCells(history: ChatMessage[]): string {
+  const cells: string[] = [];
+  const seen = new Set<string>();
+  for (const m of history) {
+    if (m.role !== "assistant") continue;
+    const stepMatch = /^\[STEP_DETAIL:(\d+)\]/.exec(m.content);
+    if (!stepMatch && !m.content.includes("[SLIDE:")) continue;
+    const label = stepMatch ? `Step ${stepMatch[1]}` : "Session plan";
+    for (const block of m.content.matchAll(/```[a-zA-Z0-9+#-]*\n([\s\S]*?)```/g)) {
+      const code = block[1].trim();
+      // Skip shell/terminal one-liners and trivial fragments — identifiers are what matter.
+      if (!code || code.length < 12 || seen.has(code)) continue;
+      seen.add(code);
+      cells.push(`# ${label}\n${code}`);
+    }
+  }
+  if (cells.length === 0) return "";
+  // Bound it: the newest cells are the ones the learner is working on now.
+  const kept = cells.slice(-12).join("\n\n");
+  return kept.length > 6000 ? `${kept.slice(-6000)}` : kept;
+}
+
 function isInternalHistoryMessage(m: ChatMessage): boolean {
   return m.role === "assistant" && (/^\[STEP_DETAIL:\d+\]/.test(m.content) || m.content.startsWith("[EXTRA_REDIRECT:"));
 }
@@ -261,7 +291,10 @@ function buildRichSystemPrompt(
   codeFiles: CodeFile[],
   history?: ChatMessage[],
   completedStepIndices?: number[],
-  olderHistorySummary?: string | null
+  olderHistorySummary?: string | null,
+  // Code cells lifted from the step pages the learner is reading (see
+  // extractStepCodeCells) — the canonical naming for this session.
+  stepCode?: string
 ): string {
   const profileContext = buildProfileContext(profile);
   const projectTypes = detectProjectTypes(`${project.title} ${project.ideaPrompt} ${node.title}`);
@@ -329,7 +362,13 @@ ${recentConcernsText}
 
 ## Current Project Code State
 ${codeContextSection}
-${checklistSection}
+${stepCode?.trim() ? `
+## Code the steps gave this learner (CANONICAL — this is what they are following)
+\`\`\`
+${stepCode.trim()}
+\`\`\`
+Binding rule: reuse these EXACT identifiers — variable names, function names, file names, signatures — whenever you discuss, extend, correct, or debug this code. Never rename or re-derive them from scratch, and never introduce a parallel version under a different name; the learner's screen shows the code above. If one of these names is genuinely wrong, say so explicitly and call update_step, rather than silently answering with a different name.
+` : ""}${checklistSection}
 ${olderHistorySection}
 ${contextSyncSection}
 ${teachingApproachSection}
@@ -645,9 +684,12 @@ export async function* streamNodeChatMessage(
 ): AsyncGenerator<string, ChatToolCall[], void> {
   const cleanedHistory = cleanChatHistory(history);
   const { recentHistory, olderSummary } = await condenseHistoryForModel(cleanedHistory);
+  // Extract from the RAW history — cleanChatHistory drops the step pages the
+  // code cells live in.
+  const stepCode = extractStepCodeCells(history);
 
   const systemPrompt = buildRichSystemPrompt(
-    node, project, profile, mapCtx, recentConcerns, codeFiles, cleanedHistory, completedStepIndices, olderSummary
+    node, project, profile, mapCtx, recentConcerns, codeFiles, cleanedHistory, completedStepIndices, olderSummary, stepCode
   );
 
   const messages: { role: "system" | "user" | "assistant"; content: string }[] = [
@@ -734,7 +776,7 @@ In 1–3 sentences, state what this session covers end-to-end — what the learn
 **Step Title (short, action-oriented)**
 
 ${isExplainerNode ? "Explain this concept/idea clearly with concrete examples. Build understanding progressively. 3–6 sentences." : "Describe exactly what the learner will do, which command/file/tool is involved, and what outcome to expect. 3–6 sentences."}
-[NOTE: one or two sentences of agent-facing handoff for the writer that later expands THIS step on its own — it will NOT see the other steps. State what earlier steps in this session (and completed prior nodes) have ALREADY set up — the project folder, virtual environment, files, functions — so this step never tells the learner to redo them, and name the exact file/function this step should touch next. Never shown to the learner.]
+[NOTE: agent-facing handoff for the writer that later expands THIS step on its own — it will NOT see the other steps. Two parts, both required. (a) DONE: what earlier steps in this session (and completed prior nodes) have ALREADY set up — folder, virtual environment, files, functions — so this step never tells the learner to redo them, and the exact file/function this step should touch next. (b) NEXT: what the FOLLOWING steps will cover, so this step stops at its own boundary and does not implement their work. Never shown to the learner.]
 
 [SLIDE:2]
 **Step Title**
@@ -814,7 +856,7 @@ export async function* streamStepDetail(
   // creation. A correction via update_step rewrites title/brief and still fully
   // determines the content.
   const noteSection = stepNote?.trim()
-    ? `\n## What earlier steps already did (do NOT tell the learner to redo any of this)\n${stepNote.trim()}\n`
+    ? `\n## Handoff note (DONE = already set up by earlier steps; NEXT = what later steps will cover)\n${stepNote.trim()}\n\nTreat everything under DONE as finished — build on it, never tell the learner to redo it. Treat everything under NEXT as OUT OF SCOPE for this page: stop at this step's boundary and do not implement the later steps' work here, even if it feels incomplete.\n`
     : "";
   const prompt = `You are generating the detailed content page for step ${stepIndex} of the session on "${node.title}".
 
@@ -847,7 +889,8 @@ Rules:
 - Keep every explanation short and concrete — no padding.
 - Code blocks must have correct language tags (\`\`\`bash, \`\`\`ts, etc.).
 - Never repeat content from other steps — stay focused on this step only.
-- If the "What earlier steps already did" section says the folder, virtual environment, or a file already exists, treat it as ALREADY DONE: build on it, never tell the learner to create it again.
+- If the handoff note says the folder, virtual environment, or a file already exists, treat it as ALREADY DONE: build on it, never tell the learner to create it again.
+- Respect this step's scope: implement ONLY what this step's title/brief covers. If the note lists later steps, leave their work to them — a step that says "define the function" writes the signature and a placeholder body, not the full logic.
 - Use LaTeX math notation ($...$ for inline, $$...$$ for block) for any formulas or equations.${langNote ? `\n${langNote}\n- IMPORTANT: Translate ALL section headings (e.g. "What you'll build", "Sub-steps", "Expected result", "If something goes wrong", "What you'll understand", "The core idea", "Breaking it down", "Worked example", "Common misconception") into the target language. Only code, commands, and technical identifiers stay in English.` : ""}`;
 
   const stream = await openrouter.chat.completions.create({

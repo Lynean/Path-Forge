@@ -730,6 +730,13 @@ export function NodeStepLightbox({
               } else if (parsed.type === "chunk" && parsed.content) {
                 fullResponse += parsed.content;
                 setChatStreamingContent(extractChatDisplay(fullResponse));
+              } else if (parsed.type === "reset") {
+                // The server hit a truncated/overloaded response and is retrying the
+                // turn — discard the partial answer so the retry isn't appended to it.
+                fullResponse = "";
+                surfacedTools.length = 0;
+                setChatStreamingContent("");
+                setToolsUsed([]);
               } else if (parsed.type === "tool_used") {
                 const t = { tool: String(parsed.tool), detail: typeof parsed.detail === "string" ? parsed.detail : undefined };
                 surfacedTools.push(t);

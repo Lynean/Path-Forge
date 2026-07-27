@@ -34,6 +34,7 @@ import {
 } from "@workspace/agent-runtime";
 import type { LearnerProfile } from "@workspace/db";
 import type { LegacyChatContext } from "./legacy-runtime";
+import { extractStepCodeCells } from "../aiNodeChat";
 import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
 import { RunPythonTool } from "./tools/run-python-tool";
 import { ProposeEnvironmentTool } from "./tools/propose-environment-tool";
@@ -46,6 +47,24 @@ class InlineContextProvider implements AgentContextProvider {
   constructor(private readonly documents: AgentContextDocuments) {}
   async load(): Promise<AgentContextDocuments> {
     return this.documents;
+  }
+}
+
+/**
+ * Wraps another provider and appends the canonical code cells from the step pages
+ * the learner is reading onto the PROJECT doc. Without this the tutor re-derives
+ * its own variable/function names and drifts out of sync with the steps on screen.
+ */
+class StepCodeContextProvider implements AgentContextProvider {
+  constructor(
+    private readonly inner: AgentContextProvider,
+    private readonly stepCode: string,
+  ) {}
+  async load(input: AgentTurnInput): Promise<AgentContextDocuments> {
+    const docs = await this.inner.load(input);
+    if (!this.stepCode.trim()) return docs;
+    const addendum = `\n\n## Code the steps gave this learner (CANONICAL — this is what is on their screen)\n\`\`\`\n${this.stepCode.trim()}\n\`\`\`\nReuse these EXACT identifiers — variable, function, and file names — whenever you discuss, extend, correct, or debug this code. Never rename them or introduce a parallel version under a different name. If one is genuinely wrong, say so explicitly and call update_step instead of silently answering with a different name.`;
+    return { ...docs, project: `${docs.project ?? ""}${addendum}` };
   }
 }
 
@@ -343,7 +362,10 @@ export class HarnessAgentRuntime implements AgentRuntime {
 
     const harness = new AgentHarness({
       model,
-      context: new FileContextProvider({ agentHome, workspaceRoot }),
+      context: new StepCodeContextProvider(
+        new FileContextProvider({ agentHome, workspaceRoot }),
+        extractStepCodeCells(ctx.history),
+      ),
       tools: new ToolRegistry(harnessTools),
       budgets: { maxRunDurationMs: 300_000, maxToolDurationMs: 240_000 },
     });
