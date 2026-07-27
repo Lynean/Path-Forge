@@ -75,10 +75,14 @@ export function extractStepCodeCells(history: ChatMessage[]): string {
     const stepMatch = /^\[STEP_DETAIL:(\d+)\]/.exec(m.content);
     if (!stepMatch && !m.content.includes("[SLIDE:")) continue;
     const label = stepMatch ? `Step ${stepMatch[1]}` : "Session plan";
-    for (const block of m.content.matchAll(/```[a-zA-Z0-9+#-]*\n([\s\S]*?)```/g)) {
-      const code = block[1].trim();
-      // Skip shell/terminal one-liners and trivial fragments — identifiers are what matter.
-      if (!code || code.length < 12 || seen.has(code)) continue;
+    for (const block of m.content.matchAll(/```([a-zA-Z0-9+#-]*)\n([\s\S]*?)```/g)) {
+      const lang = block[1].toLowerCase();
+      const code = block[2].trim();
+      if (!code || seen.has(code)) continue;
+      // Terminal snippets carry no identifiers the tutor must match, and would
+      // crowd out the real code — skip them by tag or by shape.
+      if (/^(bash|sh|shell|console|zsh|powershell|ps1|cmd|bat|text|txt)$/.test(lang)) continue;
+      if (!/[=(:]/.test(code)) continue; // no assignment/call/definition => not code we must stay in sync with
       seen.add(code);
       cells.push(`# ${label}\n${code}`);
     }
