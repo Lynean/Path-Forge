@@ -20,6 +20,13 @@ await Promise.all([
     format: "cjs",
     external: ["electron"],
     sourcemap: true,
+    // Baked at package time so a shipped app reaches the free-tier proxy with no
+    // env vars. Set PATHFORGE_PROXY_URL (and optionally PATHFORGE_APP_KEY) when
+    // packaging; empty means "no free tier", i.e. users must bring their own key.
+    define: {
+      __PATHFORGE_PROXY_URL__: JSON.stringify(process.env.PATHFORGE_PROXY_URL?.trim() ?? ""),
+      __PATHFORGE_APP_KEY__: JSON.stringify(process.env.PATHFORGE_APP_KEY?.trim() ?? ""),
+    },
   }),
   esbuild({
     absWorkingDir: packageRoot,

@@ -180,6 +180,23 @@ async function clearStoredOpenRouterKey(): Promise<void> {
   await unlink(openRouterKeyFile()).catch(() => {});
 }
 
+// Baked in at package time by build.mjs (empty in a plain dev build). An env var
+// still wins, so you can point a local build at a staging proxy.
+declare const __PATHFORGE_PROXY_URL__: string;
+declare const __PATHFORGE_APP_KEY__: string;
+
+/** Free-tier proxy settings, if this build has one. */
+function freeTierEnv(): Record<string, string> {
+  const url =
+    process.env["PATHFORGE_PROXY_URL"]?.trim() ||
+    (typeof __PATHFORGE_PROXY_URL__ === "string" ? __PATHFORGE_PROXY_URL__ : "");
+  if (!url) return {};
+  const appKey =
+    process.env["PATHFORGE_APP_KEY"]?.trim() ||
+    (typeof __PATHFORGE_APP_KEY__ === "string" ? __PATHFORGE_APP_KEY__ : "");
+  return { PATHFORGE_PROXY_URL: url, ...(appKey ? { PATHFORGE_APP_KEY: appKey } : {}) };
+}
+
 /**
  * A stable per-install id used only to meter the free tier. Random and local —
  * it identifies the installation to the quota service, nothing about the user.
@@ -866,9 +883,7 @@ async function startPathforgeBackend(): Promise<void> {
       PATHFORGE_AGENT_HOME: join(app.getPath("userData"), "agent-context"),
       // Free-tier fallback: used only while the user has no key of their own.
       PATHFORGE_DEVICE_ID: await ensureDeviceId(),
-      ...(process.env["PATHFORGE_PROXY_URL"]?.trim()
-        ? { PATHFORGE_PROXY_URL: process.env["PATHFORGE_PROXY_URL"].trim() }
-        : {}),
+      ...freeTierEnv(),
       ...(apiKey ? { OPENROUTER_API_KEY: apiKey } : {}),
     },
     stdio: "inherit",

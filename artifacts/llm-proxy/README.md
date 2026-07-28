@@ -20,13 +20,19 @@ if `PATHFORGE_APP_KEY` is set, a matching `x-pathforge-app-key`.
 
 ## How the limits work
 
-Three layers, all server-side:
+All server-side, checked before forwarding:
 
-1. **Per device** — `DEVICE_DAILY_REQUESTS` / `DEVICE_DAILY_TOKENS`.
-2. **Per IP** — `IP_DAILY_REQUESTS` / `IP_DAILY_TOKENS`, so one person can't
-   just reinstall for a fresh device id.
-3. **Global** — `GLOBAL_DAILY_TOKENS`. This is the one that truly bounds your
-   bill: once the day's total is spent, the service returns 429 to everyone.
+1. **Spend** — `DEVICE_DAILY_COST_USD` (default $0.25) and
+   `GLOBAL_DAILY_COST_USD` (default $5). OpenRouter reports the real cost of
+   every request, so these are the true bill guards. **`GLOBAL_DAILY_COST_USD`
+   is the single most important setting here** — once the day's spend is gone,
+   everyone gets a 429.
+2. **Tokens** — `DEVICE_DAILY_TOKENS` / `IP_DAILY_TOKENS` /
+   `GLOBAL_DAILY_TOKENS`, a coarser backstop if a provider ever omits cost.
+3. **Requests** — `DEVICE_DAILY_REQUESTS` / `IP_DAILY_REQUESTS`. The IP limits
+   mean one person can't just reinstall for a fresh device id.
+
+Costs are stored as integer micro-USD, so the counters stay exact.
 
 Requests are counted before forwarding; tokens are recorded after, using the
 provider's reported usage (falling back to an estimate). Over-limit responses
@@ -60,3 +66,17 @@ kubectl apply -f k8s/deployment.yaml
 
 **Scaling:** quotas are shared across pods only when `REDIS_URL` is set. Without
 Redis each pod counts separately, so keep `replicas: 1` until you wire it up.
+
+## Pointing the desktop app at it
+
+The URL is baked into the app at package time — users need no env vars:
+
+```bash
+PATHFORGE_PROXY_URL=https://llm.your-domain.com \
+PATHFORGE_APP_KEY=<same value as the k8s secret> \
+pnpm --filter @workspace/agent-desktop run package
+```
+
+Package without those variables and the build simply has no free tier: users
+must add their own key, which is the current shipping behaviour. An env var at
+runtime still overrides the baked value, so a local build can point at staging.

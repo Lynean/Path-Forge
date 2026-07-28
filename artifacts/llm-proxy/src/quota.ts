@@ -78,14 +78,29 @@ export class RedisCounterStore implements CounterStore {
 export interface QuotaDecision {
   allowed: boolean;
   /** Which limit tripped — surfaced so the app can explain it to the user. */
-  reason?: "device_requests" | "device_tokens" | "ip_requests" | "ip_tokens" | "global_tokens";
+  reason?:
+    | "device_requests"
+    | "device_tokens"
+    | "device_cost"
+    | "ip_requests"
+    | "ip_tokens"
+    | "global_tokens"
+    | "global_cost";
   retryAfterSeconds: number;
 }
 
 export interface QuotaSnapshot {
   deviceRequestsRemaining: number;
   deviceTokensRemaining: number;
+  deviceCostRemainingUsd: number;
   resetsAt: string;
+}
+
+/** What one upstream call actually consumed. */
+export interface Usage {
+  tokens: number;
+  /** Micro-USD (1_000_000 = $1), as reported by the provider when available. */
+  costMicros: number;
 }
 
 function secondsUntilUtcMidnight(): number {
@@ -105,6 +120,8 @@ export class QuotaService {
       ipRequests: `d:${day}:ip:${ip}:req`,
       ipTokens: `d:${day}:ip:${ip}:tok`,
       globalTokens: `d:${day}:global:tok`,
+      deviceCost: `d:${day}:dev:${deviceId}:cost`,
+      globalCost: `d:${day}:global:cost`,
     };
   }
 
@@ -114,12 +131,21 @@ export class QuotaService {
     const retryAfterSeconds = secondsUntilUtcMidnight();
     const { limits } = config;
 
-    const [deviceTokens, ipTokens, globalTokens] = await Promise.all([
+    const [deviceTokens, ipTokens, globalTokens, deviceCost, globalCost] = await Promise.all([
       this.store.get(k.deviceTokens),
       this.store.get(k.ipTokens),
       this.store.get(k.globalTokens),
+      this.store.get(k.deviceCost),
+      this.store.get(k.globalCost),
     ]);
 
+    // Spend ceilings first — they are the ones that bound the bill.
+    if (globalCost >= limits.globalDailyCostMicros) {
+      return { allowed: false, reason: "global_cost", retryAfterSeconds };
+    }
+    if (deviceCost >= limits.perDeviceDailyCostMicros) {
+      return { allowed: false, reason: "device_cost", retryAfterSeconds };
+    }
     if (globalTokens >= limits.globalDailyTokens) {
       return { allowed: false, reason: "global_tokens", retryAfterSeconds };
     }
@@ -142,26 +168,38 @@ export class QuotaService {
   }
 
   /** Recorded after the upstream call, from real usage when the provider reports it. */
-  async recordTokens(deviceId: string, ip: string, tokens: number): Promise<void> {
-    if (tokens <= 0) return;
+  async record(deviceId: string, ip: string, usage: Usage): Promise<void> {
     const k = this.keys(deviceId, ip);
-    await Promise.all([
-      this.store.increment(k.deviceTokens, tokens),
-      this.store.increment(k.ipTokens, tokens),
-      this.store.increment(k.globalTokens, tokens),
-    ]);
+    const writes: Promise<number>[] = [];
+    if (usage.tokens > 0) {
+      writes.push(
+        this.store.increment(k.deviceTokens, usage.tokens),
+        this.store.increment(k.ipTokens, usage.tokens),
+        this.store.increment(k.globalTokens, usage.tokens),
+      );
+    }
+    if (usage.costMicros > 0) {
+      writes.push(
+        this.store.increment(k.deviceCost, usage.costMicros),
+        this.store.increment(k.globalCost, usage.costMicros),
+      );
+    }
+    await Promise.all(writes);
   }
 
   async snapshot(deviceId: string, ip: string): Promise<QuotaSnapshot> {
     const k = this.keys(deviceId, ip);
-    const [requests, tokens] = await Promise.all([
+    const [requests, tokens, cost] = await Promise.all([
       this.store.get(k.deviceRequests),
       this.store.get(k.deviceTokens),
+      this.store.get(k.deviceCost),
     ]);
     const resetsAt = new Date(Date.now() + secondsUntilUtcMidnight() * 1000).toISOString();
     return {
       deviceRequestsRemaining: Math.max(0, config.limits.perDeviceDailyRequests - requests),
       deviceTokensRemaining: Math.max(0, config.limits.perDeviceDailyTokens - tokens),
+      deviceCostRemainingUsd:
+        Math.max(0, config.limits.perDeviceDailyCostMicros - cost) / 1_000_000,
       resetsAt,
     };
   }

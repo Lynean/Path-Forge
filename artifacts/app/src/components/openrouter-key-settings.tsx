@@ -37,7 +37,12 @@ async function removeKey(): Promise<boolean> {
 interface LlmStatus {
   mode: "byo" | "free" | "none";
   freeTierAvailable: boolean;
-  quota: { deviceRequestsRemaining: number; deviceTokensRemaining: number; resetsAt: string } | null;
+  quota: {
+    deviceRequestsRemaining: number;
+    deviceTokensRemaining: number;
+    deviceCostRemainingUsd?: number;
+    resetsAt: string;
+  } | null;
 }
 
 export function OpenRouterKeySettings() {
@@ -112,7 +117,10 @@ export function OpenRouterKeySettings() {
         <div className="rounded-lg border border-amber-400/40 bg-amber-300/15 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-200/90">
           <b>You're on the free trial.</b>{" "}
           {llm.quota
-            ? `${llm.quota.deviceRequestsRemaining} requests left today.`
+            ? `${llm.quota.deviceRequestsRemaining} requests left today` +
+              (typeof llm.quota.deviceCostRemainingUsd === "number"
+                ? ` ($${llm.quota.deviceCostRemainingUsd.toFixed(2)} of credit).`
+                : ".")
             : "A shared allowance is being used."}{" "}
           Add your own key below for unlimited use — it's free to create and you only pay OpenRouter for what you use.
         </div>

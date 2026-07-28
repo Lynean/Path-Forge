@@ -47,10 +47,15 @@ globalThis.fetch = (async (url: any, init: any) => {
     return new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } });
   }
   return new Response(
-    JSON.stringify({ choices: [{ message: { content: "hi" } }], usage: { total_tokens: 200 } }),
+    JSON.stringify({
+      choices: [{ message: { content: "hi" } }],
+      usage: { total_tokens: 200, cost: upstreamCostUsd },
+    }),
     { status: 200, headers: { "Content-Type": "application/json" } },
   );
 }) as typeof fetch;
+/** Adjustable so a test can make one request "expensive" and trip the spend cap. */
+let upstreamCostUsd = 0.000001;
 
 // ── boot on an ephemeral port ────────────────────────────────────────────────
 const app = createApp(new QuotaService(new MemoryCounterStore()));
@@ -113,6 +118,17 @@ const snap: any = await (
   await realFetch(`${base}/v1/quota`, { headers: { "x-pathforge-device": "device-abcd1234" } })
 ).json();
 check("reports remaining quota", typeof snap.deviceRequestsRemaining === "number" && typeof snap.resetsAt === "string");
+check("reports remaining spend", typeof snap.deviceCostRemainingUsd === "number", JSON.stringify(snap));
+
+// 8. spend cap: one expensive call exhausts the per-device dollar budget
+upstreamCostUsd = 1; // $1 on a $0.25/device/day budget
+const expensive = await call(validBody, { "x-pathforge-device": "device-costly0001" });
+check("allows the first (expensive) call", expensive.status === 200, `got ${expensive.status}`);
+const blocked = await call(validBody, { "x-pathforge-device": "device-costly0001" });
+const blockedJson: any = await blocked.json();
+check("blocks once the daily SPEND cap is hit", blocked.status === 429, `got ${blocked.status}`);
+check("attributes it to cost, not tokens", blockedJson.reason === "device_cost", JSON.stringify(blockedJson));
+upstreamCostUsd = 0.000001;
 
 server.close();
 console.log(`\n${failures === 0 ? "PASS" : `FAIL (${failures})`}`);

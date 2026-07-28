@@ -40,8 +40,16 @@ export const config = {
     perDeviceDailyTokens: num("DEVICE_DAILY_TOKENS", 200_000),
     perIpDailyRequests: num("IP_DAILY_REQUESTS", 200),
     perIpDailyTokens: num("IP_DAILY_TOKENS", 600_000),
-    /** The one that actually bounds your bill, whatever an attacker does. */
     globalDailyTokens: num("GLOBAL_DAILY_TOKENS", 5_000_000),
+    /**
+     * Spend ceilings in micro-USD (1_000_000 = $1). Cost is what you actually
+     * care about, and OpenRouter reports it per request, so these are the real
+     * bill guards — tokens are only a proxy for them. Integers keep the Redis
+     * counters exact (no float drift).
+     */
+    perDeviceDailyCostMicros: Math.round(num("DEVICE_DAILY_COST_USD", 0.25) * 1_000_000),
+    /** The single most important limit: your maximum spend per day. */
+    globalDailyCostMicros: Math.round(num("GLOBAL_DAILY_COST_USD", 5) * 1_000_000),
   },
 
   /** Redis is required for correct quotas across more than one replica. */

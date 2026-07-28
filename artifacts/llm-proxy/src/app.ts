@@ -34,6 +34,19 @@ function estimateTokens(body: unknown, output: string): number {
   return Math.ceil((JSON.stringify(body ?? "").length + output.length) / 4);
 }
 
+/** OpenRouter reports both totals; cost is authoritative for the spend caps. */
+interface UpstreamUsage {
+  total_tokens?: number;
+  cost?: number;
+}
+
+function usageFrom(reported: UpstreamUsage | undefined, fallbackTokens: number) {
+  return {
+    tokens: reported?.total_tokens ?? fallbackTokens,
+    costMicros: Math.round((reported?.cost ?? 0) * 1_000_000),
+  };
+}
+
 export function createApp(quota: QuotaService): Express {
   const app = express();
   app.set("trust proxy", true);
@@ -126,10 +139,10 @@ export function createApp(quota: QuotaService): Express {
 
     // 5a. Non-streaming: forward the JSON and meter the reported usage
     if (!parsed.data.stream) {
-      const json = (await upstream.json()) as { usage?: { total_tokens?: number } };
-      const used = json.usage?.total_tokens ?? estimateTokens(body, JSON.stringify(json));
-      await quota.recordTokens(deviceId, ip, used);
-      logger.info({ deviceId, tokens: used, streamed: false }, "served free-tier request");
+      const json = (await upstream.json()) as { usage?: UpstreamUsage };
+      const used = usageFrom(json.usage, estimateTokens(body, JSON.stringify(json)));
+      await quota.record(deviceId, ip, used);
+      logger.info({ deviceId, ...used, streamed: false }, "served free-tier request");
       res.json(json);
       return;
     }
@@ -145,7 +158,7 @@ export function createApp(quota: QuotaService): Express {
     const reader = upstream.body.getReader();
     const decoder = new TextDecoder();
     let buffered = "";
-    let reportedTokens = 0;
+    let reportedUsage: UpstreamUsage | undefined;
     let streamedChars = 0;
 
     // If the client hangs up, stop pulling from upstream so we stop paying for it.
@@ -170,8 +183,8 @@ export function createApp(quota: QuotaService): Express {
           const payload = line.slice(5).trim();
           if (!payload || payload === "[DONE]") continue;
           try {
-            const parsedChunk = JSON.parse(payload) as { usage?: { total_tokens?: number } };
-            if (parsedChunk.usage?.total_tokens) reportedTokens = parsedChunk.usage.total_tokens;
+            const parsedChunk = JSON.parse(payload) as { usage?: UpstreamUsage };
+            if (parsedChunk.usage?.total_tokens) reportedUsage = parsedChunk.usage;
           } catch {
             // partial JSON across chunk boundaries — ignore
           }
@@ -180,9 +193,9 @@ export function createApp(quota: QuotaService): Express {
     } catch (err) {
       logger.warn({ err }, "stream interrupted");
     } finally {
-      const used = reportedTokens || estimateTokens(body, "x".repeat(streamedChars));
-      await quota.recordTokens(deviceId, ip, used).catch(() => {});
-      logger.info({ deviceId, tokens: used, streamed: true }, "served free-tier request");
+      const used = usageFrom(reportedUsage, estimateTokens(body, "x".repeat(streamedChars)));
+      await quota.record(deviceId, ip, used).catch(() => {});
+      logger.info({ deviceId, ...used, streamed: true }, "served free-tier request");
       if (!res.writableEnded) res.end();
     }
   });
