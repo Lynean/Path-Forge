@@ -1,0 +1,79 @@
+# PathForge free-tier LLM proxy.
+#
+# Create the secret first (never commit the key):
+#   kubectl create secret generic pathforge-llm-proxy \
+#     --from-literal=openrouter-api-key='sk-or-v1-...' \
+#     --from-literal=app-key='<random string also baked into the app>'
+#
+# Quotas are shared across replicas ONLY when REDIS_URL is set. Without Redis,
+# keep replicas at 1 or every pod counts its own quota.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pathforge-llm-proxy
+  labels: { app: pathforge-llm-proxy }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: pathforge-llm-proxy }
+  template:
+    metadata:
+      labels: { app: pathforge-llm-proxy }
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: proxy
+          image: ghcr.io/REPLACE_ME/pathforge-llm-proxy:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: PORT
+              value: "8080"
+            - name: OPENROUTER_API_KEY
+              valueFrom:
+                secretKeyRef: { name: pathforge-llm-proxy, key: openrouter-api-key }
+            - name: PATHFORGE_APP_KEY
+              valueFrom:
+                secretKeyRef: { name: pathforge-llm-proxy, key: app-key }
+            # Uncomment once Redis is available, then raise replicas.
+            # - name: REDIS_URL
+            #   value: redis://pathforge-redis:6379
+            - name: ALLOWED_MODELS
+              value: google/gemini-3.1-flash-lite
+            - name: DEVICE_DAILY_REQUESTS
+              value: "60"
+            - name: DEVICE_DAILY_TOKENS
+              value: "200000"
+            - name: IP_DAILY_REQUESTS
+              value: "200"
+            - name: IP_DAILY_TOKENS
+              value: "600000"
+            # The ceiling that actually bounds the bill.
+            - name: GLOBAL_DAILY_TOKENS
+              value: "5000000"
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: 500m, memory: 512Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 3
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: pathforge-llm-proxy
+spec:
+  selector: { app: pathforge-llm-proxy }
+  ports:
+    - port: 80
+      targetPort: 8080
