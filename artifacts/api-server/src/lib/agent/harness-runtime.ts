@@ -69,6 +69,35 @@ class StepCodeContextProvider implements AgentContextProvider {
 }
 
 const MODEL = "google/gemini-3.1-flash-lite";
+
+/**
+ * Condenses one oversized tool result into what it contributed to the task, so a
+ * long run on a file-heavy project doesn't carry every full file in context. Only
+ * ever applied to results the model has already moved past (see
+ * ObservationCompaction) — the newest result stays verbatim.
+ */
+async function summarizeObservation(input: {
+  tool: string;
+  arguments: Record<string, unknown>;
+  output: unknown;
+}): Promise<string> {
+  const { openrouter } = await import("@workspace/integrations-openrouter-ai");
+  const raw = JSON.stringify(input.output ?? "").slice(0, 24_000);
+  const response = await openrouter.chat.completions.create({
+    model: MODEL,
+    max_tokens: 300,
+    messages: [
+      {
+        role: "user",
+        content: `A coding tutor ran the tool \`${input.tool}\` with arguments ${JSON.stringify(
+          input.arguments,
+        )} and got the result below. In at most 4 sentences, state what this result established about the project — what exists, what it does, key names (files, functions, variables) worth remembering, and anything that looked wrong. Facts only, no advice.\n\nRESULT:\n${raw}`,
+      },
+    ],
+  });
+  return response.choices[0]?.message?.content ?? "";
+}
+
 const NO_SANDBOX_MESSAGE =
   "No local project folder is attached to this lesson, so there is nothing to run. Attach a folder to enable running code.";
 
@@ -368,6 +397,13 @@ export class HarnessAgentRuntime implements AgentRuntime {
       ),
       tools: new ToolRegistry(harnessTools),
       budgets: { maxRunDurationMs: 300_000, maxToolDurationMs: 240_000 },
+      // Safety valve for projects with many large files: once a bulky result is
+      // no longer the one being reasoned about, keep only what it contributed.
+      // Typical turns (a few hundred tokens of tool output) never reach this.
+      observationCompaction: {
+        maxCharacters: 8_000,
+        summarize: summarizeObservation,
+      },
     });
 
     this.active.set(input.runId, harness);

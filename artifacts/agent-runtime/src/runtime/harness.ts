@@ -23,11 +23,30 @@ export interface HarnessRunBudgets {
   maxInvalidArgumentRetries: number;
 }
 
+/**
+ * Optional compaction for bulky tool results. A run keeps every observation in
+ * context so the model can reason over them, which is cheap normally (a few
+ * hundred tokens) but unbounded on projects with many large files. When
+ * configured, an observation larger than `maxCharacters` is replaced by a short
+ * natural-language summary of what it contributed — but ONLY once it is no
+ * longer the most recent result, so the output the model is actively reasoning
+ * about is always verbatim (exact identifiers, exact tracebacks).
+ */
+export interface ObservationCompaction {
+  maxCharacters: number;
+  summarize: (input: {
+    tool: string;
+    arguments: Record<string, unknown>;
+    output: unknown;
+  }) => Promise<string>;
+}
+
 export interface HarnessOptions {
   model: ModelAdapter;
   tools: ToolRegistry;
   context?: AgentContextProvider;
   budgets?: Partial<HarnessRunBudgets>;
+  observationCompaction?: ObservationCompaction;
   /** @deprecated Use budgets.maxModelTurns. */
   maxTurns?: number;
 }
@@ -122,6 +141,38 @@ export class AgentHarness implements AgentRuntime {
         requested.maxInvalidArgumentRetries ?? DEFAULT_HARNESS_RUN_BUDGETS.maxInvalidArgumentRetries,
       ),
     };
+  }
+
+  /**
+   * Replaces oversized results with a short summary of what they contributed,
+   * skipping the most recent one (the model is still reasoning over it) and any
+   * already compacted. Best-effort: a failed summary leaves the result verbatim,
+   * since dropping evidence is worse than spending the tokens.
+   */
+  private async compactOlderObservations(observations: ToolObservation[]): Promise<void> {
+    const compaction = this.options.observationCompaction;
+    if (!compaction || observations.length < 2) return;
+    for (const observation of observations.slice(0, -1)) {
+      const record = observation as ToolObservation & { compacted?: boolean };
+      if (record.compacted) continue;
+      const serialized = JSON.stringify(observation.output ?? "");
+      if (serialized.length <= compaction.maxCharacters) continue;
+      try {
+        const summary = await compaction.summarize({
+          tool: observation.tool,
+          arguments: observation.arguments,
+          output: observation.output,
+        });
+        if (!summary.trim()) continue;
+        observation.output = {
+          compactedResult: summary.trim(),
+          note: "Summary of an earlier large tool result; re-run the tool if exact content is needed.",
+        };
+        record.compacted = true;
+      } catch {
+        // keep the verbatim output
+      }
+    }
   }
 
   private async *executeToolEvents(
@@ -389,6 +440,9 @@ export class AgentHarness implements AgentRuntime {
         if (tool.invalidatesPriorToolResults?.(output)) {
           toolStateRevision += 1;
         }
+        // Now that a newer result exists, bulky older ones can be summarized —
+        // the newest observation is always left verbatim.
+        await this.compactOlderObservations(observations);
         yield { type: "tool_completed", tool: tool.name, output };
       }
 
