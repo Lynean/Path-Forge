@@ -35,6 +35,7 @@ import {
 import type { LearnerProfile } from "@workspace/db";
 import type { LegacyChatContext } from "./legacy-runtime";
 import { extractStepCodeCells } from "../aiNodeChat";
+import { logger } from "../logger";
 import { createPathforgePlanTools } from "./tools/plan-proposal-tools";
 import { RunPythonTool } from "./tools/run-python-tool";
 import { ProposeEnvironmentTool } from "./tools/propose-environment-tool";
@@ -83,6 +84,7 @@ async function summarizeObservation(input: {
 }): Promise<string> {
   const { openrouter } = await import("@workspace/integrations-openrouter-ai");
   const raw = JSON.stringify(input.output ?? "").slice(0, 24_000);
+  const originalChars = JSON.stringify(input.output ?? "").length;
   const response = await openrouter.chat.completions.create({
     model: MODEL,
     max_tokens: 300,
@@ -95,7 +97,12 @@ async function summarizeObservation(input: {
       },
     ],
   });
-  return response.choices[0]?.message?.content ?? "";
+  const summary = response.choices[0]?.message?.content ?? "";
+  logger.info(
+    { tool: input.tool, fromChars: originalChars, toChars: summary.length },
+    "compacted an older tool observation",
+  );
+  return summary;
 }
 
 const NO_SANDBOX_MESSAGE =
