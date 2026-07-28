@@ -36,7 +36,9 @@ export function ProjectRecommendations({ onSelect }: ProjectRecommendationsProps
   if (isError) {
     return (
       <div className="mb-10 flex items-center justify-between rounded-xl border border-dashed border-border bg-card/50 px-5 py-4">
-        <p className="text-sm text-muted-foreground">Couldn't load project ideas right now.</p>
+        <p className="text-sm text-muted-foreground">
+          Couldn't load project ideas — this needs an API key (see above), or check your connection.
+        </p>
         <Button size="sm" variant="outline" onClick={() => refetch()}>
           <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Try again
         </Button>

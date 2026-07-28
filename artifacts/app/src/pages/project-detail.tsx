@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useRoute, useLocation } from "wouter";
+import { useRoute, useLocation, Link } from "wouter";
 import {
   useGetProject,
   useGetNodeMap,
@@ -29,6 +29,22 @@ import { NodeMapCanvas } from "@/components/node-map-canvas";
 import { NodeStepLightbox } from "@/components/node-step-lightbox";
 import { WorkspaceConnector } from "@/components/workspace-connector";
 import { Sparkles, RefreshCw, AlertCircle, ArrowLeft, PenLine, Loader2, FileText } from "lucide-react";
+
+/** Pull the API's own error text out of whatever shape the client threw. */
+function serverMessage(error: unknown): string {
+  const anyErr = error as { response?: { data?: { error?: string } }; data?: { error?: string }; message?: string };
+  return anyErr?.response?.data?.error ?? anyErr?.data?.error ?? anyErr?.message ?? "";
+}
+
+function needsApiKey(error: unknown): boolean {
+  return /api key is not configured/i.test(serverMessage(error));
+}
+
+function generationErrorMessage(error: unknown): string {
+  if (needsApiKey(error)) return "No API key configured — the AI can't build your plan yet.";
+  const message = serverMessage(error);
+  return message ? `Generation failed: ${message}` : "Generation failed. Try again.";
+}
 
 export default function ProjectDetail() {
   const [matchExact, paramsExact] = useRoute("/projects/:projectId");
@@ -321,9 +337,16 @@ export default function ProjectDetail() {
 
           {generateMap.error && !isGenerating ? (
             <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-              <div className="bg-destructive/10 border border-destructive/30 rounded-xl px-5 py-3 text-center max-w-sm">
+              <div className="bg-destructive/10 border border-destructive/30 rounded-xl px-5 py-3 text-center max-w-sm pointer-events-auto">
                 <AlertCircle className="w-7 h-7 text-destructive mx-auto mb-2" />
-                <p className="text-sm font-mono text-destructive">Generation failed. Try again.</p>
+                {/* Show the server's actual reason (e.g. a missing API key) — a bare
+                    "try again" sends the learner in circles when retrying can't help. */}
+                <p className="text-sm font-mono text-destructive">{generationErrorMessage(generateMap.error)}</p>
+                {needsApiKey(generateMap.error) ? (
+                  <Button asChild size="sm" className="mt-3">
+                    <Link href="/profile">Add your key</Link>
+                  </Button>
+                ) : null}
               </div>
             </div>
           ) : null}

@@ -3,6 +3,7 @@ import { useLocation } from "wouter";
 import { useOptionalUser } from "@/lib/useOptionalUser";
 import { useListProjects, useCreateProject, useDeleteProject, useGetProjectStats, getListProjectsQueryKey } from "@workspace/api-client-react";
 import { ImportProjectButton, ExportProjectButton } from "@/components/project-share";
+import { AiAccessBanner } from "@/components/ai-access-banner";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -370,6 +371,8 @@ export default function Projects() {
           </div>
         </div>
       </div>
+
+      <AiAccessBanner />
 
       <ProjectRecommendations onSelect={handleSelectRecommendation} />
 
