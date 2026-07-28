@@ -34,15 +34,29 @@ async function removeKey(): Promise<boolean> {
   return res.ok ? Boolean((await res.json())?.configured) : false;
 }
 
+interface LlmStatus {
+  mode: "byo" | "free" | "none";
+  freeTierAvailable: boolean;
+  quota: { deviceRequestsRemaining: number; deviceTokensRemaining: number; resetsAt: string } | null;
+}
+
 export function OpenRouterKeySettings() {
   const { toast } = useToast();
   const [configured, setConfigured] = useState<boolean | null>(null);
+  const [llm, setLlm] = useState<LlmStatus | null>(null);
   const [value, setValue] = useState("");
   const [busy, setBusy] = useState(false);
   const persistsEncrypted = Boolean(getDesktopBridge()?.setOpenRouterKey);
 
+  const refreshLlm = () =>
+    fetch("/api/settings/llm")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setLlm)
+      .catch(() => setLlm(null));
+
   useEffect(() => {
     fetchStatus().then(setConfigured).catch(() => setConfigured(false));
+    void refreshLlm();
   }, []);
 
   const onSave = async () => {
@@ -52,6 +66,7 @@ export function OpenRouterKeySettings() {
     try {
       setConfigured(await saveKey(key));
       setValue("");
+      await refreshLlm();
       toast({ title: "API key saved" });
     } catch (err: any) {
       toast({ title: "Could not save key", description: err?.message, variant: "destructive" });
@@ -64,6 +79,7 @@ export function OpenRouterKeySettings() {
     setBusy(true);
     try {
       setConfigured(await removeKey());
+      await refreshLlm();
       toast({ title: "API key removed" });
     } finally {
       setBusy(false);
@@ -92,6 +108,20 @@ export function OpenRouterKeySettings() {
         </a>
         .
       </p>
+      {llm?.mode === "free" && (
+        <div className="rounded-lg border border-amber-400/40 bg-amber-300/15 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-200/90">
+          <b>You're on the free trial.</b>{" "}
+          {llm.quota
+            ? `${llm.quota.deviceRequestsRemaining} requests left today.`
+            : "A shared allowance is being used."}{" "}
+          Add your own key below for unlimited use — it's free to create and you only pay OpenRouter for what you use.
+        </div>
+      )}
+      {llm?.mode === "none" && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-[12px]">
+          <b>No AI access yet.</b> Add your OpenRouter key below to start.
+        </div>
+      )}
       <div className="flex gap-2">
         <Input
           type="password"

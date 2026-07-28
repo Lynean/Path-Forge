@@ -180,6 +180,23 @@ async function clearStoredOpenRouterKey(): Promise<void> {
   await unlink(openRouterKeyFile()).catch(() => {});
 }
 
+/**
+ * A stable per-install id used only to meter the free tier. Random and local —
+ * it identifies the installation to the quota service, nothing about the user.
+ */
+async function ensureDeviceId(): Promise<string> {
+  const file = join(app.getPath("userData"), "device-id");
+  try {
+    const existing = (await readFile(file, "utf8")).trim();
+    if (existing) return existing;
+  } catch {
+    // not created yet
+  }
+  const id = randomUUID().replace(/-/g, "");
+  await writeFile(file, id, "utf8").catch(() => {});
+  return id;
+}
+
 function backendSettingsUrl(): string {
   return `http://127.0.0.1:${pathforgeBackendPort()}/api/settings/openrouter`;
 }
@@ -847,6 +864,11 @@ async function startPathforgeBackend(): Promise<void> {
       PATHFORGE_APP_DIST: appDist,
       // Persist the tutor's SOUL/USER memory docs in userData (not a temp dir).
       PATHFORGE_AGENT_HOME: join(app.getPath("userData"), "agent-context"),
+      // Free-tier fallback: used only while the user has no key of their own.
+      PATHFORGE_DEVICE_ID: await ensureDeviceId(),
+      ...(process.env["PATHFORGE_PROXY_URL"]?.trim()
+        ? { PATHFORGE_PROXY_URL: process.env["PATHFORGE_PROXY_URL"].trim() }
+        : {}),
       ...(apiKey ? { OPENROUTER_API_KEY: apiKey } : {}),
     },
     stdio: "inherit",

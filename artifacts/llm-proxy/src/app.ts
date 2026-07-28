@@ -16,20 +16,18 @@ function clientIp(req: Request): string {
   return forwarded || req.socket.remoteAddress || "unknown";
 }
 
-/** Only pass through what we intend to support; anything else is rejected. */
-const ChatBody = z
-  .object({
-    model: z.string().min(1),
-    messages: z.array(z.record(z.string(), z.unknown())).min(1),
-    stream: z.boolean().optional(),
-    max_tokens: z.number().int().positive().optional(),
-    temperature: z.number().optional(),
-    tools: z.array(z.unknown()).optional(),
-    tool_choice: z.unknown().optional(),
-    parallel_tool_calls: z.boolean().optional(),
-    response_format: z.unknown().optional(),
-  })
-  .strict();
+/**
+ * Validates the fields this service governs (model, size) and lets the rest of
+ * an OpenAI-compatible body through — SDKs add fields over time, and rejecting
+ * unknown keys would break real clients for no security gain, since the model
+ * allowlist and token clamp below are what actually bound cost.
+ */
+const ChatBody = z.object({
+  model: z.string().min(1),
+  messages: z.array(z.record(z.string(), z.unknown())).min(1),
+  stream: z.boolean().optional(),
+  max_tokens: z.number().int().positive().optional(),
+});
 
 function estimateTokens(body: unknown, output: string): number {
   // Fallback when the provider does not report usage: ~4 chars per token.
@@ -79,7 +77,8 @@ export function createApp(quota: QuotaService): Express {
       return;
     }
     const body = {
-      ...parsed.data,
+      ...(req.body as Record<string, unknown>),
+      model: parsed.data.model,
       max_tokens: Math.min(parsed.data.max_tokens ?? config.maxTokensPerRequest, config.maxTokensPerRequest),
       // Ask the provider to report real usage, including on streamed responses.
       usage: { include: true },
@@ -126,10 +125,11 @@ export function createApp(quota: QuotaService): Express {
     }
 
     // 5a. Non-streaming: forward the JSON and meter the reported usage
-    if (!body.stream) {
+    if (!parsed.data.stream) {
       const json = (await upstream.json()) as { usage?: { total_tokens?: number } };
       const used = json.usage?.total_tokens ?? estimateTokens(body, JSON.stringify(json));
       await quota.recordTokens(deviceId, ip, used);
+      logger.info({ deviceId, tokens: used, streamed: false }, "served free-tier request");
       res.json(json);
       return;
     }

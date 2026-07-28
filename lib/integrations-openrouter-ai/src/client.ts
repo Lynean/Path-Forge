@@ -24,23 +24,73 @@ export function isOpenRouterConfigured(): boolean {
   return getOpenRouterApiKey() !== null;
 }
 
+/**
+ * Free-tier fallback: when the user has no key of their own, calls are routed to
+ * the PathForge proxy, which holds the project's key and enforces daily quotas.
+ * Configured by the host (the desktop shell) — absent in plain cloud deploys.
+ */
+export interface FreeTierConfig {
+  proxyUrl: string;
+  deviceId: string;
+  appKey?: string;
+}
+
+export function getFreeTierConfig(): FreeTierConfig | null {
+  const proxyUrl = process.env.PATHFORGE_PROXY_URL?.trim();
+  const deviceId = process.env.PATHFORGE_DEVICE_ID?.trim();
+  if (!proxyUrl || !deviceId) return null;
+  return { proxyUrl: proxyUrl.replace(/\/+$/, ""), deviceId, appKey: process.env.PATHFORGE_APP_KEY?.trim() };
+}
+
+/** How AI calls are being paid for right now — surfaced in Settings. */
+export type LlmMode = "byo" | "free" | "none";
+
+export function getLlmMode(): LlmMode {
+  if (getOpenRouterApiKey()) return "byo";
+  return getFreeTierConfig() ? "free" : "none";
+}
+
 function resolveClient(): OpenAI {
   const key = getOpenRouterApiKey();
-  if (!key) {
-    throw new Error("OpenRouter API key is not configured. Add your key in Settings.");
+  if (key) {
+    if (!cached || cached.key !== key) {
+      cached = {
+        key,
+        client: new OpenAI({
+          baseURL: "https://openrouter.ai/api/v1",
+          apiKey: key,
+          timeout: 120_000,
+          maxRetries: 2,
+        }),
+      };
+    }
+    return cached.client;
   }
-  if (!cached || cached.key !== key) {
-    cached = {
-      key,
-      client: new OpenAI({
-        baseURL: "https://openrouter.ai/api/v1",
-        apiKey: key,
-        timeout: 120_000,
-        maxRetries: 2,
-      }),
-    };
+
+  // No key of their own — fall back to the metered free tier when it's configured.
+  const free = getFreeTierConfig();
+  if (free) {
+    const cacheKey = `free:${free.proxyUrl}:${free.deviceId}`;
+    if (!cached || cached.key !== cacheKey) {
+      cached = {
+        key: cacheKey,
+        client: new OpenAI({
+          baseURL: `${free.proxyUrl}/v1`,
+          // The proxy authenticates by headers; it supplies the real key upstream.
+          apiKey: free.appKey || "pathforge-free-tier",
+          timeout: 120_000,
+          maxRetries: 2,
+          defaultHeaders: {
+            "x-pathforge-device": free.deviceId,
+            ...(free.appKey ? { "x-pathforge-app-key": free.appKey } : {}),
+          },
+        }),
+      };
+    }
+    return cached.client;
   }
-  return cached.client;
+
+  throw new Error("OpenRouter API key is not configured. Add your key in Settings.");
 }
 
 // Lazy proxy: the real OpenAI client is built on first property access using the

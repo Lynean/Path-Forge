@@ -3,6 +3,8 @@ import { z } from "zod/v4";
 import {
   setOpenRouterApiKey,
   isOpenRouterConfigured,
+  getFreeTierConfig,
+  getLlmMode,
 } from "@workspace/integrations-openrouter-ai";
 import { requireAuth } from "../lib/auth";
 import { isLocalMode } from "../lib/localMode";
@@ -26,6 +28,27 @@ const SetKeyBody = z.object({ apiKey: z.string().min(1).max(400) });
 router.get("/settings/openrouter", requireAuth, (req, res): void => {
   if (!localOnly(res)) return;
   res.json({ configured: isOpenRouterConfigured() });
+});
+
+/**
+ * How AI calls are currently paid for, plus what's left of the free allowance.
+ * "byo" = the user's own key, "free" = the metered PathForge proxy, "none" =
+ * nothing configured. The quota is fetched from the proxy; a failure there just
+ * omits it rather than breaking Settings.
+ */
+router.get("/settings/llm", requireAuth, async (req, res): Promise<void> => {
+  if (!localOnly(res)) return;
+  const mode = getLlmMode();
+  const free = getFreeTierConfig();
+  let quota: unknown = null;
+  if (mode === "free" && free) {
+    quota = await fetch(`${free.proxyUrl}/v1/quota`, {
+      headers: { "x-pathforge-device": free.deviceId },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .catch(() => null);
+  }
+  res.json({ mode, freeTierAvailable: Boolean(free), quota });
 });
 
 // Sets the runtime key (held in memory by the integration client). Persistence +
