@@ -5,7 +5,14 @@ import { WorkspaceAccess } from "../workspace/workspace-access";
 import type { AgentTool } from "./tool";
 
 const DEFAULT_MAX_FILE_CHARS = 100_000;
-const SKIPPED_DIRECTORIES = new Set([".git", "node_modules", "dist", "build", ".next"]);
+const SKIPPED_DIRECTORIES = new Set([
+  ".git",
+  ".next",
+  "build",
+  "dist",
+  "graph",
+  "node_modules",
+]);
 
 function portablePath(path: string): string {
   return path.split(sep).join("/") || ".";
@@ -13,25 +20,57 @@ function portablePath(path: string): string {
 
 export class ReadFileTool implements AgentTool {
   readonly name = "read_file";
-  readonly description = "Read a UTF-8 text file inside the user-approved workspace.";
+  readonly description =
+    "Read a UTF-8 text file inside the user-approved workspace. For a large file, use search_code first, then pass startLine/endLine to read only the relevant range.";
   readonly inputSchema = z
     .object({
       path: z.string().min(1),
+      startLine: z.number().int().min(1).optional(),
+      endLine: z.number().int().min(1).optional(),
     })
-    .strict();
+    .strict()
+    .refine(
+      ({ startLine, endLine }) =>
+        startLine === undefined || endLine === undefined || endLine >= startLine,
+      { message: "endLine must be greater than or equal to startLine" },
+    );
 
   constructor(
     private readonly workspace: WorkspaceAccess,
     private readonly maxCharacters = DEFAULT_MAX_FILE_CHARS,
+    private readonly maxExecutions = Number.POSITIVE_INFINITY,
   ) {}
 
+  private executions = 0;
+
   async execute(arguments_: Record<string, unknown>): Promise<unknown> {
+    if (this.executions >= this.maxExecutions) {
+      return {
+        error: "READ_FILE_LIMIT_REACHED",
+        message: `This inspection is limited to ${this.maxExecutions} source-file reads. Use the evidence already collected.`,
+      };
+    }
     const relativePath = arguments_["path"] as string;
     const content = await this.workspace.readTextFile(relativePath);
+    this.executions += 1;
+    const lines = content.split(/\r?\n/);
+    const requestedStart = (arguments_["startLine"] as number | undefined) ?? 1;
+    const requestedEnd = (arguments_["endLine"] as number | undefined) ?? lines.length;
+    const startIndex = Math.min(requestedStart - 1, lines.length);
+    const endIndex = Math.min(requestedEnd, lines.length);
+    const selected = lines.slice(startIndex, endIndex).join("\n");
+    const clipped = selected.slice(0, this.maxCharacters);
+    const includedLines = clipped ? clipped.split(/\r?\n/).length : 0;
     return {
       path: relativePath,
-      content: content.slice(0, this.maxCharacters),
-      truncated: content.length > this.maxCharacters,
+      content: clipped,
+      startLine: startIndex + 1,
+      endLine: includedLines > 0 ? startIndex + includedLines : startIndex + 1,
+      totalLines: lines.length,
+      truncated:
+        startIndex > 0 ||
+        endIndex < lines.length ||
+        selected.length > this.maxCharacters,
     };
   }
 }

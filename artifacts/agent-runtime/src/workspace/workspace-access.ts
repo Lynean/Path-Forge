@@ -105,11 +105,13 @@ export class WorkspaceAccess {
       "soul.md",
       "user.md",
     ]);
+    const protectedPaths = new Set(["graph/project_graph.json"]);
     if (
+      protectedPaths.has(normalized.toLowerCase()) ||
       segments.some((segment) => protectedNames.has(segment.toLowerCase())) ||
       segments.some((segment) => segment.toLowerCase().startsWith(".env."))
     ) {
-      throw new Error(`This file is protected from agent edits: ${relativePath}`);
+      throw new Error(`This file is protected from agent access: ${relativePath}`);
     }
     return normalized;
   }

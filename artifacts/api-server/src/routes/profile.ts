@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq } from "drizzle-orm";
-import { db, learnerProfilesTable } from "@workspace/db";
+import { db, learnerProfilesTable, learnerRecommendationsTable } from "@workspace/db";
 import {
   UpsertProfileBody,
   GetProfileResponse,
@@ -35,24 +35,31 @@ router.put("/profile", requireAuth, async (req, res): Promise<void> => {
     return;
   }
 
-  const [existing] = await db
-    .select()
-    .from(learnerProfilesTable)
-    .where(eq(learnerProfilesTable.clerkUserId, userId));
+  const profile = await db.transaction(async (tx) => {
+    const [existing] = await tx
+      .select()
+      .from(learnerProfilesTable)
+      .where(eq(learnerProfilesTable.clerkUserId, userId));
 
-  let profile;
-  if (existing) {
-    [profile] = await db
-      .update(learnerProfilesTable)
-      .set(parsed.data)
-      .where(eq(learnerProfilesTable.clerkUserId, userId))
-      .returning();
-  } else {
-    [profile] = await db
-      .insert(learnerProfilesTable)
-      .values({ clerkUserId: userId, ...parsed.data })
-      .returning();
-  }
+    const [savedProfile] = existing
+      ? await tx
+          .update(learnerProfilesTable)
+          .set(parsed.data)
+          .where(eq(learnerProfilesTable.clerkUserId, userId))
+          .returning()
+      : await tx
+          .insert(learnerProfilesTable)
+          .values({ clerkUserId: userId, ...parsed.data })
+          .returning();
+
+    // A recommendation set is derived from the profile. Never keep serving ideas
+    // generated for the learner's old interests, level, age, or language.
+    await tx
+      .delete(learnerRecommendationsTable)
+      .where(eq(learnerRecommendationsTable.clerkUserId, userId));
+
+    return savedProfile;
+  });
 
   res.json(UpsertProfileResponse.parse(profile));
 });

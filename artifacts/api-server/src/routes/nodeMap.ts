@@ -30,7 +30,7 @@ import {
   SpawnExtraNodeResponse,
 } from "@workspace/api-zod";
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { requireAuth, getAuthUserId } from "../lib/auth";
 import { updateUserDocFromNode } from "../lib/userMemory";
@@ -38,8 +38,32 @@ import { isChatOnlyMode } from "../lib/chatOnly";
 import { generateNodeMap } from "../lib/aiNodeMap";
 import { readWorkspaceSnapshot } from "../lib/workspaceSnapshot";
 import { streamVisualization } from "../lib/aiVisualize";
-import { createAgentRuntime, resolveAgentRuntimeKind, inspectProjectState } from "../lib/agent";
+import {
+  createAgentRuntime,
+  resolveAgentRuntimeKind,
+  inspectProjectState,
+  streamAgenticStepDetail,
+} from "../lib/agent";
+import {
+  readRelevantCodeContext,
+  type RelevantCodeContext,
+} from "../lib/relevantCodeContext";
 import { DbRunRecorder } from "../lib/agent/db-run-recorder";
+import {
+  groundTutorResponseInToolEvidence,
+  isCrossStepCorrectionReason,
+  usesStepCorrectionTool,
+} from "../lib/agent/response-guards";
+import {
+  applyPlanEdits,
+  applySessionWideCorrectionInvariant,
+  buildCompletionProjectDocument,
+  buildEffectiveStepNote,
+  formatStepSlideBody,
+  noteWithCorrection,
+  parseOpeningSlides,
+  parseStepSlideBody,
+} from "../lib/agent/learning-plan-guards";
 import {
   streamNodeChatMessage,
   streamOpeningMessage,
@@ -47,8 +71,9 @@ import {
   classifyExtraNodeNeeded,
   generateNodeSummary,
   generateSpawnedNode,
-  generateStepUpdate,
+  generateStepDescriptionUpdate,
   revisePlanNodes,
+  extractStepCodeCells,
   extractCodeContextUpdates,
   applyCodeContextUpdates,
   extractSessionFacts,
@@ -174,10 +199,15 @@ function synthesizeActionSummary(toolCalls: ChatToolCall[]): string {
   const parts: string[] = [];
   for (const tc of toolCalls) {
     switch (tc.name) {
-      case "update_step":
+      case "update_step_description":
         if (typeof tc.args.stepNumber === "number") {
           const introToo = typeof tc.args.introUpdate === "string" && tc.args.introUpdate.trim();
-          parts.push(`Updated step ${tc.args.stepNumber}${introToo ? " and the session overview" : ""}.`);
+          parts.push(`Updated step ${tc.args.stepNumber}'s title and description${introToo ? " and the session overview" : ""}.`);
+        }
+        break;
+      case "regenerate_step_with_notes":
+        if (typeof tc.args.stepNumber === "number") {
+          parts.push(`Regenerated step ${tc.args.stepNumber} with the correction.`);
         }
         break;
       case "add_steps":
@@ -195,80 +225,6 @@ function synthesizeActionSummary(toolCalls: ChatToolCall[]): string {
     }
   }
   return parts.join(" ");
-}
-
-interface OpeningSlide { key: string; body: string }
-
-// The opening message (first real assistant message in a chat session) encodes the
-// session plan as `[SLIDE:intro]...[SLIDE:1]...[SLIDE:2]...`. These helpers parse/
-// reserialize that format so step-update/intro-update/steps-add edits from the AI can be
-// applied to the one persisted copy instead of only living in the current stream.
-function parseOpeningSlides(content: string): OpeningSlide[] {
-  const slides: OpeningSlide[] = [];
-  const parts = content.split(/\[SLIDE:(\w+)\]/);
-  for (let i = 1; i < parts.length - 1; i += 2) {
-    const key = parts[i].trim();
-    const body = parts[i + 1].trim();
-    if (body) slides.push({ key, body });
-  }
-  return slides;
-}
-
-function serializeOpeningSlides(slides: OpeningSlide[]): string {
-  return slides.map(({ key, body }) => `[SLIDE:${key}]\n${body}`).join("\n\n");
-}
-
-// Step slide bodies are always `**Title**\n<brief>` (see streamOpeningMessage's format
-// instructions and applyPlanEdits' own writes) — extracts the two parts back out for use
-// as context when generating a step update.
-function parseStepSlideBody(body: string): { title: string; brief: string } {
-  const match = /^\*\*(.+?)\*\*\s*\n+([\s\S]*)$/.exec(body.trim());
-  if (!match) return { title: "", brief: body.trim() };
-  return { title: match[1].trim(), brief: match[2].trim() };
-}
-
-/**
- * Applies update_step / add_steps tool calls onto a node's persisted opening message.
- * Returns the new opening content plus which step numbers had their content replaced
- * (their generated detail page is now stale and must regenerate). update_step's optional
- * introUpdate rewrites the intro slide's own body alongside the step — there is no
- * standalone way to edit only the intro. Broader plan changes that plausibly touch many
- * steps at once go through a full regeneration instead — see regenerate_session.
- */
-function applyPlanEdits(
-  openingContent: string,
-  stepUpdates: Map<number, string>,
-  newSteps: Array<{ title: string; brief: string }>,
-  introUpdate?: string | null
-): { content: string; invalidatedStepNumbers: number[] } {
-  const slides = parseOpeningSlides(openingContent);
-  const invalidatedStepNumbers: number[] = [];
-
-  for (const slide of slides) {
-    if (slide.key === "intro") {
-      if (introUpdate) slide.body = introUpdate;
-      continue;
-    }
-    const n = parseInt(slide.key, 10);
-    if (!isNaN(n) && stepUpdates.has(n)) {
-      slide.body = stepUpdates.get(n)!;
-      invalidatedStepNumbers.push(n);
-    }
-  }
-
-  if (newSteps.length > 0) {
-    const existingStepNumbers = slides.map((s) => parseInt(s.key, 10)).filter((n) => !isNaN(n));
-    let nextStepNumber = existingStepNumbers.length > 0 ? Math.max(...existingStepNumbers) + 1 : 1;
-    for (const step of newSteps) {
-      slides.push({ key: String(nextStepNumber), body: `**${step.title}**\n${step.brief}` });
-      nextStepNumber++;
-    }
-  }
-
-  return {
-    content: serializeOpeningSlides(slides),
-    invalidatedStepNumbers,
-  };
 }
 
 async function getRecentConcerns(excludeNodeId: number, mapId: number): Promise<string[]> {
@@ -669,22 +625,6 @@ router.patch("/projects/:projectId/nodes/:nodeId", requireAuth, async (req, res)
     }
   }
 
-  // Tutor maintains USER.md once per node: on completion, reflect on this node's
-  // conversation and refresh the durable learner memory. Fire-and-forget so it
-  // never blocks the completion response.
-  if (parsed.data.status === "completed") {
-    getOrCreateChatSession(node.id)
-      .then((session) => {
-        const history = (Array.isArray(session.messages) ? session.messages : []) as ChatMessage[];
-        return updateUserDocFromNode({
-          nodeTitle: node.title,
-          messages: history.map((m) => ({ role: m.role, content: m.content })),
-          profileSummary: profileForSummary?.profileSummary ?? null,
-        });
-      })
-      .catch((err) => req.log.warn({ err }, "USER.md update on node completion failed"));
-  }
-
   // Status update, dependent-unlock, and project-completion must apply together —
   // a failure partway through would otherwise leave dependents locked despite their
   // prerequisite showing "completed".
@@ -723,6 +663,60 @@ router.patch("/projects/:projectId/nodes/:nodeId", requireAuth, async (req, res)
       }
     }
   });
+
+  if (parsed.data.status === "completed") {
+    const [session, attachedWorkspace] = await Promise.all([
+      getOrCreateChatSession(node.id),
+      db.select().from(projectWorkspacesTable)
+        .where(eq(projectWorkspacesTable.projectId, params.data.projectId))
+        .then((rows) => rows[0]),
+    ]);
+    const history = (Array.isArray(session.messages) ? session.messages : []) as ChatMessage[];
+    const memoryUpdates: Promise<unknown>[] = [
+      updateUserDocFromNode({
+        nodeTitle: node.title,
+        projectTitle: project.title,
+        messages: history.map((message) => ({
+          role: message.role,
+          content: message.content,
+        })),
+        profileSummary: profileForSummary?.profileSummary ?? null,
+      }),
+    ];
+
+    if (!isChatOnlyMode && attachedWorkspace?.path) {
+      memoryUpdates.push(
+        inspectProjectState({
+          node,
+          project,
+          profile: profileForSummary ?? null,
+          workspaceRoot: attachedWorkspace.path,
+          phase: "after_completion",
+        }).then(async (inspection) => {
+          const workspaceSnapshot = await readWorkspaceSnapshot(attachedWorkspace.path, {
+            maxEntries: 80,
+            maxDepth: 3,
+            maxKeyFileChars: 2_000,
+            maxTotalChars: 6_000,
+          });
+          const doc = buildCompletionProjectDocument({
+            nodeTitle: node.title,
+            inspectionReport: inspection.report,
+            completionSummary: summary,
+            workspaceSnapshot,
+          });
+          await writeFile(join(attachedWorkspace.path, "PROJECT.md"), doc, "utf8");
+        }),
+      );
+    }
+
+    const memoryResults = await Promise.allSettled(memoryUpdates);
+    for (const result of memoryResults) {
+      if (result.status === "rejected") {
+        req.log.warn({ err: result.reason }, "durable agent memory refresh failed");
+      }
+    }
+  }
 
   const updatedNodes = await db.select().from(nodesTable).where(eq(nodesTable.mapId, map.id)).orderBy(nodesTable.createdAt);
   const nodeIds = updatedNodes.map((n) => n.id);
@@ -797,10 +791,11 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
   // first; its state report grounds the (format-reliable) step writer so steps
   // reflect what the learner has really done and which file to change next.
   let liveInspection: string | undefined;
+  let relevantCode: RelevantCodeContext | undefined;
   if (!isChatOnlyMode && attachedWorkspace?.path) {
     res.write(`data: ${JSON.stringify({ type: "inspecting" })}\n\n`);
-    liveInspection =
-      (await inspectProjectState(
+    const inspection =
+      await inspectProjectState(
         {
           node,
           project,
@@ -812,8 +807,12 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
         },
       ).catch((err) => {
         req.log.warn({ err }, "project inspection for step generation failed");
-        return "";
-      })) || undefined;
+        return null;
+      });
+    liveInspection = inspection?.report || undefined;
+    relevantCode = inspection?.relevantCode.excerpts.length
+      ? inspection.relevantCode
+      : undefined;
 
     // Step generator owns PROJECT.md: refresh it once per node-open with the
     // current project-state report, so it stays the durable project memory the
@@ -828,7 +827,17 @@ router.post("/projects/:projectId/nodes/:nodeId/opening-message", requireAuth, a
 
   let fullContent = "";
   try {
-    for await (const chunk of streamOpeningMessage(node, project, profile ?? null, { allNodes, allEdges }, recentConcerns, codeFiles, undefined, liveInspection)) {
+    for await (const chunk of streamOpeningMessage(
+      node,
+      project,
+      profile ?? null,
+      { allNodes, allEdges },
+      recentConcerns,
+      codeFiles,
+      undefined,
+      liveInspection,
+      relevantCode,
+    )) {
       fullContent += chunk;
       res.write(`data: ${JSON.stringify({ content: chunk })}\n\n`);
     }
@@ -1022,7 +1031,13 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
       }
     }
 
-    const displayContent = fullContent.trim() || synthesizeActionSummary(toolCalls);
+    const usedStepCorrection = usesStepCorrectionTool(toolCalls);
+    // Correction tools update the canonical step page. Persist/show only the concise
+    // action notice even if the model redundantly re-taught the entire step in text.
+    const groundedContent = groundTutorResponseInToolEvidence(fullContent, toolCalls);
+    const displayContent = usedStepCorrection
+      ? synthesizeActionSummary(toolCalls)
+      : groundedContent.trim() || synthesizeActionSummary(toolCalls);
     const userMsg: ChatMessage = { role: "user", content: body.data.content, createdAt: new Date().toISOString() };
     const assistantMsg: ChatMessage = {
       role: "assistant",
@@ -1072,6 +1087,14 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
         }
 
         if (regeneratedContent) {
+          // The model may mention a cross-session correction only in the intro.
+          // Persist the trusted tool reason into EVERY step's hidden handoff so
+          // lazy detail generation cannot reintroduce the old filename/tool/etc.
+          regeneratedContent = applySessionWideCorrectionInvariant(
+            regeneratedContent,
+            reason,
+          );
+
           const updatedMessages = await updateChatSession(node.id, (current) => {
             const openingIdx = current.findIndex((m) => m.role === "assistant" && m.content.includes("[SLIDE:"));
             const next = openingIdx === -1
@@ -1092,15 +1115,16 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
         res.write(`data: ${JSON.stringify({ type: "plan_update_failed" })}\n\n`);
       }
     } else {
-      // Apply any update_step / add_steps calls to the persisted session plan (the
+      // Apply step-description corrections, detail-regeneration notes, and add_steps
+      // calls to the persisted session plan (the
       // opening message), and purge cached step-detail pages that are now stale so they
       // regenerate the next time the learner opens them. There's no standalone
-      // intro-editing tool — an intro fix only ever rides along inside an update_step
+      // intro-editing tool — an intro fix only ever rides along inside a description update
       // call (its optional introUpdate field), never alone.
       //
       // Two-phase content generation: the chat model only flags stepNumber + reason (it
       // does not author the new title/description itself). Phase 1 below runs a
-      // dedicated generateStepUpdate() call per flagged step, using the step's current
+      // dedicated generateStepDescriptionUpdate() call per flagged step, using the step's current
       // content + sibling steps + the reason as context, so the rewrite stays consistent
       // with the rest of the plan instead of depending on whatever else was in this chat
       // turn. Phase 2 (streamStepDetail, on next open) then regenerates the step's detail
@@ -1108,12 +1132,14 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
       const stepUpdates = new Map<number, string>();
       let introUpdate: string | null = null;
 
-      const updateStepCalls = toolCalls.filter(
+      const updateStepDescriptionCalls = toolCalls.filter(
         (tc): tc is ChatToolCall & { args: { stepNumber: number; reason: string } } =>
-          tc.name === "update_step" && typeof tc.args.stepNumber === "number" && typeof tc.args.reason === "string"
+          tc.name === "update_step_description" &&
+          typeof tc.args.stepNumber === "number" &&
+          typeof tc.args.reason === "string"
       );
 
-      if (updateStepCalls.length > 0) {
+      if (updateStepDescriptionCalls.length > 0) {
         const openingMsgForRead = newMessages.find((m) => m.role === "assistant" && m.content.includes("[SLIDE:"));
         const currentSlides = openingMsgForRead ? parseOpeningSlides(openingMsgForRead.content) : [];
         const stepSlideByNumber = new Map(
@@ -1122,9 +1148,22 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
             .map((s) => [parseInt(s.key, 10), parseStepSlideBody(s.body)] as const)
         );
 
+        const updateRequests = new Map<number, { reason: string; crossStep: boolean }>();
+        for (const tc of updateStepDescriptionCalls) {
+          const crossStep = isCrossStepCorrectionReason(
+            `${tc.args.reason}\n${body.data.content}`,
+          );
+          const targets = crossStep
+            ? [...stepSlideByNumber.keys()].filter((number) => number >= tc.args.stepNumber)
+            : [tc.args.stepNumber];
+          for (const stepNumber of targets) {
+            updateRequests.set(stepNumber, { reason: tc.args.reason, crossStep });
+          }
+        }
+
         const results = await Promise.allSettled(
-          updateStepCalls.map(async (tc) => {
-            const { stepNumber, reason } = tc.args;
+          [...updateRequests.entries()].map(async ([stepNumber, request]) => {
+            const { reason, crossStep } = request;
             const currentStep = stepSlideByNumber.get(stepNumber);
             if (!currentStep) throw new Error(`Step ${stepNumber} not found in current plan`);
 
@@ -1132,14 +1171,29 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
               .filter(([n]) => n !== stepNumber)
               .map(([, s]) => s);
 
-            const result = await generateStepUpdate(node, project, reason, currentStep, siblingSteps);
-            return { stepNumber, result };
+            const result = await generateStepDescriptionUpdate(
+              node, project, profile ?? null, reason, currentStep, siblingSteps
+            );
+            return {
+              stepNumber,
+              result,
+              note: crossStep
+                ? noteWithCorrection(currentStep.note, reason)
+                : currentStep.note,
+            };
           })
         );
 
         for (const r of results) {
           if (r.status === "fulfilled") {
-            stepUpdates.set(r.value.stepNumber, `**${r.value.result.title}**\n${r.value.result.brief}`);
+            stepUpdates.set(
+              r.value.stepNumber,
+              formatStepSlideBody({
+                title: r.value.result.title,
+                brief: r.value.result.brief,
+                note: r.value.note,
+              })
+            );
           } else {
             req.log.error({ err: r.reason }, "step update generation failed for one step");
           }
@@ -1147,9 +1201,48 @@ router.post("/projects/:projectId/nodes/:nodeId/chat", requireAuth, async (req, 
       }
 
       for (const tc of toolCalls) {
-        if (tc.name !== "update_step") continue;
+        if (tc.name !== "update_step_description") continue;
         if (typeof tc.args.introUpdate === "string" && tc.args.introUpdate.trim()) {
           introUpdate = tc.args.introUpdate.trim();
+        }
+      }
+
+      const regenerateStepCalls = toolCalls.filter(
+        (tc): tc is ChatToolCall & { args: { stepNumber: number; issueNote: string } } =>
+          tc.name === "regenerate_step_with_notes" &&
+          typeof tc.args.stepNumber === "number" &&
+          typeof tc.args.issueNote === "string" &&
+          Boolean(tc.args.issueNote.trim())
+      );
+
+      if (regenerateStepCalls.length > 0) {
+        const openingMsgForRead = newMessages.find(
+          (m) => m.role === "assistant" && m.content.includes("[SLIDE:")
+        );
+        const currentSlides = openingMsgForRead ? parseOpeningSlides(openingMsgForRead.content) : [];
+        const stepSlideByNumber = new Map(
+          currentSlides
+            .filter((s) => s.key !== "intro")
+            .map((s) => [parseInt(s.key, 10), parseStepSlideBody(s.body)] as const)
+        );
+
+        for (const tc of regenerateStepCalls) {
+          const current =
+            (stepUpdates.has(tc.args.stepNumber)
+              ? parseStepSlideBody(stepUpdates.get(tc.args.stepNumber)!)
+              : stepSlideByNumber.get(tc.args.stepNumber));
+          if (!current) {
+            req.log.warn({ stepNumber: tc.args.stepNumber }, "step regeneration target not found");
+            continue;
+          }
+          stepUpdates.set(
+            tc.args.stepNumber,
+            formatStepSlideBody({
+              title: current.title,
+              brief: current.brief,
+              note: noteWithCorrection(current.note, tc.args.issueNote),
+            })
+          );
         }
       }
 
@@ -1266,6 +1359,42 @@ router.post("/projects/:projectId/nodes/:nodeId/step-detail", requireAuth, async
   const [profile] = await db.select().from(learnerProfilesTable).where(eq(learnerProfilesTable.clerkUserId, userId));
   const { files: codeFiles } = await getOrCreateCodeContext(params.data.projectId);
   const mapCtx = await getMapContext(map.id);
+  const session = await getOrCreateChatSession(node.id);
+  const history = (Array.isArray(session?.messages) ? session.messages : []) as ChatMessage[];
+  // Only earlier steps are canonical input. Excluding this and future step pages
+  // prevents a stale regeneration from feeding its own broken code back in.
+  const priorStepCode = extractStepCodeCells(history, stepIndex);
+  const openingMessage = history.find(
+    (message) =>
+      message.role === "assistant" &&
+      message.content.includes("[SLIDE:"),
+  );
+  const laterSteps = openingMessage
+    ? parseOpeningSlides(openingMessage.content)
+        .filter((slide) => slide.key !== "intro" && Number.parseInt(slide.key, 10) > stepIndex)
+        .map((slide) => {
+          const parsed = parseStepSlideBody(slide.body);
+          return {
+            stepNumber: Number.parseInt(slide.key, 10),
+            title: parsed.title,
+            brief: parsed.brief,
+          };
+        })
+    : [];
+  const futureNodes = mapCtx.allNodes
+    .filter(
+      (candidate) =>
+        candidate.id !== node.id &&
+        candidate.status !== "completed",
+    )
+    .map((candidate) => ({ title: candidate.title, brief: candidate.brief }));
+  const effectiveStepNote = buildEffectiveStepNote({
+    stepNote,
+    laterSteps,
+    futureNodes,
+  });
+  const [attachedWorkspace] = await db.select().from(projectWorkspacesTable)
+    .where(eq(projectWorkspacesTable.projectId, params.data.projectId));
 
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -1277,17 +1406,115 @@ router.post("/projects/:projectId/nodes/:nodeId/step-detail", requireAuth, async
     res.write(": ping\n\n");
   }, 15000);
 
+  const writeStatus = (stage: string, message: string): void => {
+    res.write(`data: ${JSON.stringify({ type: "status", stage, message })}\n\n`);
+  };
+  const streamDirectFallback = async (): Promise<string> => {
+    let fallbackCode: RelevantCodeContext | undefined;
+    if (!isChatOnlyMode && attachedWorkspace?.path) {
+      const projectMemory = await readFile(
+        join(attachedWorkspace.path, "PROJECT.md"),
+        "utf8",
+      ).catch(() => "");
+      const referenceText = [
+        node.agentContext ?? "",
+        projectMemory,
+        stepTitle,
+        stepBrief ?? "",
+        effectiveStepNote,
+      ].join("\n");
+      const hints = [
+        node.title,
+        node.brief,
+        stepTitle,
+        stepBrief ?? "",
+        effectiveStepNote,
+      ].join("\n");
+      const currentCode = await readRelevantCodeContext(
+        attachedWorkspace.path,
+        referenceText,
+        hints,
+      ).catch((err) => {
+        req.log.warn({ err }, "bounded fallback code retrieval failed");
+        return null;
+      });
+      fallbackCode = currentCode?.excerpts.length ? currentCode : undefined;
+    }
+
+    let content = "";
+    const stream = streamStepDetail(
+      node,
+      project,
+      profile ?? null,
+      mapCtx,
+      codeFiles,
+      stepIndex,
+      stepTitle,
+      stepBrief ?? "",
+      effectiveStepNote || undefined,
+      priorStepCode,
+      fallbackCode,
+    );
+    for await (const chunk of stream) content += chunk;
+    return content;
+  };
+
   let fullContent = "";
   try {
-    const stream = streamStepDetail(
-      node, project, profile ?? null, mapCtx, codeFiles,
-      stepIndex, stepTitle, stepBrief ?? "", stepNote
-    );
-    for await (const chunk of stream) {
-      fullContent += chunk;
-      res.write(`data: ${JSON.stringify({ type: "chunk", content: chunk })}\n\n`);
+    if (!isChatOnlyMode && attachedWorkspace?.path) {
+      try {
+        writeStatus("planning", "Deciding which current code this step needs…");
+        for await (const event of streamAgenticStepDetail({
+          node,
+          project,
+          profile: profile ?? null,
+          mapCtx,
+          codeFiles,
+          workspaceRoot: attachedWorkspace.path,
+          step: {
+            index: stepIndex,
+            title: stepTitle,
+            brief: stepBrief ?? "",
+            ...(effectiveStepNote ? { note: effectiveStepNote } : {}),
+          },
+          priorStepCode,
+        })) {
+          if (event.type === "tool_started") {
+            const args = event.arguments as Record<string, unknown>;
+            const detail =
+              typeof args.query === "string" ? ` “${args.query}”`
+              : typeof args.path === "string" ? ` ${args.path}`
+              : "";
+            const message =
+              event.tool === "graph_search" ? `Searching the code graph${detail}…`
+              : event.tool === "graph_parent" ? "Expanding the surrounding code…"
+              : event.tool === "search_code" ? `Searching source text${detail}…`
+              : event.tool === "read_file" ? `Reading the relevant lines from${detail}…`
+              : `Using ${event.tool}…`;
+            writeStatus(event.tool, message);
+          } else if (event.type === "tool_completed") {
+            writeStatus("writing", "Writing the walkthrough from current project evidence…");
+          } else if (event.type === "completed") {
+            fullContent = event.result.response;
+          } else if (event.type === "failed") {
+            throw new Error(event.message);
+          }
+          // text_delta events from intermediate tool turns are intentionally
+          // buffered by the harness result and never mixed into lesson content.
+        }
+        if (!fullContent.trim()) throw new Error("Step agent returned no walkthrough");
+      } catch (agentError) {
+        req.log.warn({ err: agentError }, "tool-enabled step agent failed; using direct fallback");
+        writeStatus(
+          "fallback",
+          "The tool-enabled pass could not finish; using bounded current-code retrieval…",
+        );
+        fullContent = await streamDirectFallback();
+      }
+    } else {
+      writeStatus("writing", "Generating the detailed walkthrough…");
+      fullContent = await streamDirectFallback();
     }
-    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
 
     // Persist to DB so subsequent opens don't regenerate.
     // Encoded as a regular "assistant" message with a STEP_DETAIL marker so
@@ -1309,6 +1536,8 @@ router.post("/projects/:projectId/nodes/:nodeId/step-detail", requireAuth, async
         ];
       });
     }
+    res.write(`data: ${JSON.stringify({ type: "chunk", content: fullContent })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "done" })}\n\n`);
   } catch (err: any) {
     req.log.error({ err }, "step-detail stream error");
     res.write(`data: ${JSON.stringify({ type: "error", error: err?.message ?? "Unknown error" })}\n\n`);

@@ -16,6 +16,17 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
 }
 
+function toolDisplayName(tool: string): string {
+  switch (tool) {
+    case "graph_search":
+      return "Search code graph";
+    case "graph_parent":
+      return "Expand parent graph node";
+    default:
+      return tool;
+  }
+}
+
 function eventLabel(event: AgentEvent): string {
   switch (event.type) {
     case "run_started":
@@ -23,13 +34,13 @@ function eventLabel(event: AgentEvent): string {
     case "model_turn_started":
       return `Model turn ${event.turn}`;
     case "tool_started":
-      return `Tool requested · ${event.tool}`;
+      return `Tool requested · ${toolDisplayName(event.tool)}`;
     case "tool_progress":
       return `Sandbox · ${event.stage.replaceAll("_", " ")}`;
     case "tool_completed":
-      return `Tool completed · ${event.tool}`;
+      return `Tool completed · ${toolDisplayName(event.tool)}`;
     case "tool_rejected":
-      return `Tool blocked · ${event.tool}`;
+      return `Tool blocked · ${toolDisplayName(event.tool)}`;
     case "text_delta":
       return "Answer prepared";
     case "completed":

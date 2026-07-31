@@ -25,11 +25,18 @@ class PlanProposalTool implements AgentTool {
   }
 }
 
-const updateStepSchema = z
+const updateStepDescriptionSchema = z
   .object({
     stepNumber: z.number().int().positive(),
     reason: z.string().min(1),
     introUpdate: z.string().optional(),
+  })
+  .strict();
+
+const regenerateStepWithNotesSchema = z
+  .object({
+    stepNumber: z.number().int().positive(),
+    issueNote: z.string().min(1),
   })
   .strict();
 
@@ -52,20 +59,25 @@ const markStepsDoneSchema = z
   .strict();
 
 /**
- * The five learning-plan proposal tools, given to the harness alongside its
+ * The six learning-plan proposal tools, given to the harness alongside its
  * read-only workspace tools. Descriptions mirror the legacy tool guidance so the
  * model uses them the same way.
  */
 export function createPathforgePlanTools(): AgentTool[] {
   return [
     new PlanProposalTool(
-      "update_step",
-      "Flag a specific step as needing to change, with a clear reason — you do NOT write the new title/description yourself. Call when the learner asks to change a step, a step is clearly wrong, or you are self-correcting something that affects that step. Also check later steps that build on the same fact/tool and flag each that is now wrong. If the session overview also needs fixing, include introUpdate (written by you in full).",
-      updateStepSchema as unknown as z.ZodType<Record<string, unknown>>,
+      "update_step_description",
+      "Use ONLY when a step's visible title or short description states the wrong goal or scope. Call proactively when the learner reports it; they do not need to explicitly request an update. A dedicated pass rewrites title/description while preserving DONE/NEXT. Keep the text reply to one short sentence.",
+      updateStepDescriptionSchema as unknown as z.ZodType<Record<string, unknown>>,
+    ),
+    new PlanProposalTool(
+      "regenerate_step_with_notes",
+      "Use when title/description are correct but the detailed content or code is wrong, incomplete, contradicts an earlier step, removes prior code, or changes established identifiers. Preserve title/description and DONE/NEXT; issueNote guides regeneration. Call proactively when the learner reflects the issue and keep the text reply to one short sentence.",
+      regenerateStepWithNotesSchema as unknown as z.ZodType<Record<string, unknown>>,
     ),
     new PlanProposalTool(
       "regenerate_session",
-      "RARE. Rebuild the entire session plan (intro + every step) because a foundational assumption changed broadly (environment/tooling swapped, architecture pivoted). For a single wrong step use update_step instead.",
+      "RARE. Rebuild the entire session plan because a foundational assumption changed broadly. For one wrong step use update_step_description or regenerate_step_with_notes.",
       regenerateSessionSchema as unknown as z.ZodType<Record<string, unknown>>,
     ),
     new PlanProposalTool(

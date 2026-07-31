@@ -79,7 +79,8 @@ function toProposedActions(toolCalls: ChatToolCall[]): AgentResult["proposedActi
         return { type: "revise_plan", reason };
       case "spawn_node":
         return { type: "spawn_node", reason };
-      case "update_step":
+      case "update_step_description":
+      case "regenerate_step_with_notes":
       case "add_steps":
       case "mark_steps_done":
         return { type: "update_steps", reason };

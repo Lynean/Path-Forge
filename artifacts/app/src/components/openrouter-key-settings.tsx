@@ -117,7 +117,7 @@ export function OpenRouterKeySettings() {
         <div className="rounded-lg border border-amber-400/40 bg-amber-300/15 px-3 py-2 text-[12px] text-amber-700 dark:text-amber-200/90">
           <b>You're on the free trial.</b>{" "}
           {llm.quota
-            ? `${llm.quota.deviceRequestsRemaining} requests left today` +
+            ? `${llm.quota.deviceRequestsRemaining} requests and ${llm.quota.deviceTokensRemaining.toLocaleString()} tokens left today` +
               (typeof llm.quota.deviceCostRemainingUsd === "number"
                 ? ` ($${llm.quota.deviceCostRemainingUsd.toFixed(2)} of credit).`
                 : ".")

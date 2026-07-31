@@ -2,6 +2,7 @@ import { access, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { z } from "zod/v4";
 import type { AgentDecision, ModelTurnContext } from "../contracts";
 import { FileContextProvider } from "../context/file-context-provider";
 import { StaticContextProvider } from "../context/context-provider";
@@ -24,6 +25,7 @@ import { FakeTutorModelAdapter } from "../testing/fake-model-adapter";
 import { InvalidToolArgumentsModelAdapter } from "../testing/invalid-tool-arguments-model-adapter";
 import { MockInspectProjectTool } from "../testing/mock-tools";
 import { ToolRegistry } from "../tools/tool";
+import type { AgentTool } from "../tools/tool";
 import { RunCommandTool, UnsupportedRunCommandTool } from "../tools/run-command-tool";
 import { ApplyPatchTool } from "../tools/workspace-edit-tool";
 import {
@@ -985,6 +987,71 @@ if (
   console.error("FAIL rejected run_command returns evidence without preparing a sandbox");
 }
 
+class SingleExecutionTool implements AgentTool {
+  readonly name = "run_once";
+  readonly description = "A deterministic stand-in for a costly execution tool.";
+  readonly inputSchema = z.object({ attempt: z.number().int() }).strict();
+  readonly maxCallsPerRun = 1;
+  executionCount = 0;
+
+  async execute(): Promise<unknown> {
+    this.executionCount += 1;
+    return { stderr: "Traceback: one real failure" };
+  }
+}
+
+class RepeatExecutionModel implements ModelAdapter {
+  async decide(context: ModelTurnContext): Promise<AgentDecision> {
+    const limited = context.observations.some(
+      (observation) =>
+        (observation.output as { error?: unknown })?.error === "TOOL_CALL_LIMIT",
+    );
+    if (limited) {
+      return {
+        type: "final",
+        response: "Traceback: one real failure",
+        proposedActions: [{ type: "none", reason: "Use the existing evidence." }],
+      };
+    }
+    return {
+      type: "tool_call",
+      call: {
+        id: `repeat-${context.turn}`,
+        name: "run_once",
+        arguments: { attempt: context.turn },
+      },
+    };
+  }
+}
+
+const singleExecutionTool = new SingleExecutionTool();
+const singleExecutionHarness = new AgentHarness({
+  model: new RepeatExecutionModel(),
+  tools: new ToolRegistry([singleExecutionTool]),
+  maxTurns: 4,
+});
+const singleExecutionEvents = [];
+for await (const event of singleExecutionHarness.runTurn({
+  ...invalidArgumentsInput,
+  runId: "single-execution-cap-eval",
+})) {
+  singleExecutionEvents.push(event);
+}
+if (
+  singleExecutionTool.executionCount === 1 &&
+  singleExecutionEvents.some(
+    (event) =>
+      event.type === "tool_rejected" &&
+      event.code === "TOOL_CALL_LIMIT",
+  ) &&
+  singleExecutionEvents.some((event) => event.type === "completed")
+) {
+  console.log("PASS per-run tool caps prevent repeated costly execution");
+} else {
+  failures += 1;
+  console.error("FAIL per-run tool caps prevent repeated costly execution");
+}
+
 const cancellableCommandSandbox = new FakeSandbox({
   commandDelayMs: 60_000,
   commandResults: {
@@ -1120,5 +1187,5 @@ try {
 if (failures > 0) {
   process.exitCode = 1;
 } else {
-  console.log(`\nAll ${evalCases.length + 30} harness evals passed.`);
+  console.log(`\nAll ${evalCases.length + 31} harness evals passed.`);
 }

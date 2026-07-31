@@ -11,10 +11,14 @@ import {
   ExactCommandPolicy,
   FakeTutorModelAdapter,
   FileContextProvider,
+  GraphCodeFileTool,
+  GraphParentTool,
+  GraphSearchTool,
   InspectProjectTool,
   ListFilesTool,
   OpenRouterModelAdapter,
   PreparePythonDependenciesTool,
+  ProjectGraphStore,
   RuntimeDetector,
   RuntimePolicy,
   RunCommandTool,
@@ -133,10 +137,16 @@ async function resolveOpenRouterApiKey(): Promise<string | null> {
     return process.env["OPENROUTER_API_KEY"]!.trim();
   }
 
-  const candidates = [
-    join(process.cwd(), ".env"),
-    join(app.getAppPath(), "..", "..", ".env"),
-  ];
+  // Reading a repository .env is a development convenience only. A packaged
+  // desktop may be launched from any working directory (including the source
+  // repository used to start a local proxy); treating that directory's proxy
+  // key as the learner's personal BYO key would bypass the free-tier proxy.
+  const candidates = app.isPackaged
+    ? []
+    : [
+        join(process.cwd(), ".env"),
+        join(app.getAppPath(), "..", "..", ".env"),
+      ];
   for (const path of [...new Set(candidates)]) {
     try {
       const value = parseEnvValue(await readFile(path, "utf8"), "OPENROUTER_API_KEY");
@@ -456,6 +466,7 @@ async function createHarness(
   } else {
     commandTool = new UnsupportedRunCommandTool(detection.message);
   }
+  const projectGraph = new ProjectGraphStore(workspace);
   return new AgentHarness({
     model: await createModel(request),
     context: new FileContextProvider({ agentHome, workspaceRoot }),
@@ -464,6 +475,9 @@ async function createHarness(
       new ListFilesTool(workspace),
       new ReadFileTool(workspace),
       new SearchCodeTool(workspace),
+      new GraphCodeFileTool(workspace),
+      new GraphSearchTool(workspace, projectGraph),
+      new GraphParentTool(projectGraph),
       new ApplyPatchTool(workspace, sandboxes),
       new PreparePythonDependenciesTool({ workspace, sandboxes }),
       commandTool,

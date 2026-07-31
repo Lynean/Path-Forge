@@ -11,8 +11,31 @@ import { LANGUAGE_OPTIONS } from "@/lib/profile-questions";
 import { isLocalMode } from "@/lib/localMode";
 import { OpenRouterKeySettings } from "@/components/openrouter-key-settings";
 
+function profileToForm(profile: {
+  age?: number | null;
+  educationLevel?: string | null;
+  major?: string | null;
+  profileSummary: string;
+  preferredLanguage?: string | null;
+}) {
+  return {
+    age: profile.age?.toString() || "",
+    educationLevel: profile.educationLevel || "",
+    major: profile.major || "",
+    profileSummary: profile.profileSummary || "",
+    preferredLanguage: profile.preferredLanguage || ""
+  };
+}
+
 export default function Profile() {
-  const { data: profile, isLoading } = useGetProfile();
+  // Settings should always show database truth when the user returns to this page,
+  // even if another mounted route still has an older profile in the shared cache.
+  const { data: profile, isLoading } = useGetProfile({
+    query: {
+      queryKey: getGetProfileQueryKey(),
+      refetchOnMount: "always",
+    },
+  });
   const upsertProfile = useUpsertProfile();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -27,13 +50,7 @@ export default function Profile() {
 
   useEffect(() => {
     if (profile) {
-      setFormData({
-        age: profile.age?.toString() || "",
-        educationLevel: profile.educationLevel || "",
-        major: profile.major || "",
-        profileSummary: profile.profileSummary || "",
-        preferredLanguage: profile.preferredLanguage || ""
-      });
+      setFormData(profileToForm(profile));
     }
   }, [profile]);
 
@@ -52,10 +69,18 @@ export default function Profile() {
       },
       {
         onSuccess: (savedProfile) => {
-          // Keep the shared profile query (also read by App.tsx's auth gate) in sync so
-          // other views don't keep serving pre-save data.
+          // Reflect exactly what the API persisted, then verify it with a fresh GET.
+          setFormData(profileToForm(savedProfile));
           queryClient.setQueryData(getGetProfileQueryKey(), savedProfile);
+          void queryClient.invalidateQueries({ queryKey: getGetProfileQueryKey() });
           toast({ title: "Profile updated" });
+        },
+        onError: (error) => {
+          toast({
+            title: "Could not save profile",
+            description: error instanceof Error ? error.message : "Please try again.",
+            variant: "destructive",
+          });
         }
       }
     );
@@ -72,11 +97,14 @@ export default function Profile() {
         <div className="grid md:grid-cols-2 gap-6">
           <div className="space-y-2">
             <Label htmlFor="age">Age</Label>
-            <Input id="age" type="number" value={formData.age} onChange={(e) => setFormData({ ...formData, age: e.target.value })} />
+            <Input id="age" type="number" value={formData.age} onChange={(e) => setFormData((prev) => ({ ...prev, age: e.target.value }))} />
           </div>
           <div className="space-y-2">
             <Label>Education Level</Label>
-            <Select value={formData.educationLevel} onValueChange={(val) => setFormData({ ...formData, educationLevel: val })}>
+            <Select
+              value={formData.educationLevel}
+              onValueChange={(val) => val && setFormData((prev) => ({ ...prev, educationLevel: val }))}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select level" />
               </SelectTrigger>
@@ -95,7 +123,12 @@ export default function Profile() {
         <div className="grid md:grid-cols-2 gap-6">
           <div className="space-y-2">
             <Label>Preferred Language</Label>
-            <Select value={formData.preferredLanguage} onValueChange={(val) => setFormData({ ...formData, preferredLanguage: val })}>
+            {/* Ignore empty emissions: there is no blank option, so "" only ever
+                arrives spuriously and would wipe the value loaded from the profile. */}
+            <Select
+              value={formData.preferredLanguage}
+              onValueChange={(val) => val && setFormData((prev) => ({ ...prev, preferredLanguage: val }))}
+            >
               <SelectTrigger>
                 <SelectValue placeholder="Select language" />
               </SelectTrigger>
@@ -110,7 +143,7 @@ export default function Profile() {
         
         <div className="space-y-2">
           <Label htmlFor="major">Major / Field</Label>
-          <Input id="major" value={formData.major} onChange={(e) => setFormData({ ...formData, major: e.target.value })} />
+          <Input id="major" value={formData.major} onChange={(e) => setFormData((prev) => ({ ...prev, major: e.target.value }))} />
         </div>
 
         <div className="space-y-2">
@@ -122,7 +155,7 @@ export default function Profile() {
           <Textarea
             id="profileSummary"
             value={formData.profileSummary}
-            onChange={(e) => setFormData({ ...formData, profileSummary: e.target.value })}
+            onChange={(e) => setFormData((prev) => ({ ...prev, profileSummary: e.target.value }))}
             className="min-h-[160px]"
           />
         </div>

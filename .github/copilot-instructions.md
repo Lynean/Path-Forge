@@ -28,7 +28,34 @@ pnpm --filter @workspace/api-spec run codegen
 pnpm --filter @workspace/db run push
 ```
 
-**Required env:** `DATABASE_URL` (Postgres connection string), `VITE_CLERK_PUBLISHABLE_KEY`, and Clerk backend keys.
+`pnpm` is mandatory — a `preinstall` guard rejects npm/yarn.
+
+**Required env:** `DATABASE_URL` (Postgres connection string), `OPENROUTER_API_KEY`, `VITE_CLERK_PUBLISHABLE_KEY`, and Clerk backend keys (`CLERK_SECRET_KEY`, `CLERK_PUBLISHABLE_KEY`, `VITE_CLERK_PROXY_URL`).
+
+### Tests
+
+There is no unit-test framework. Verification is the agent eval suites, each a
+plain tsx entry point under `src/evals/` that can be run individually:
+
+```bash
+pnpm run agent:verify         # typecheck + non-Docker suites
+pnpm run agent:build-images   # build the two sandbox images
+pnpm run agent:verify:docker  # Docker Desktop + local images required
+
+pnpm --filter @workspace/agent-runtime run eval            # in-process, no Docker
+pnpm --filter @workspace/agent-runtime run eval:repair
+pnpm --filter @workspace/agent-runtime run eval:docker
+pnpm --filter @workspace/agent-runtime run eval:docker:python
+pnpm --filter @workspace/agent-desktop run eval
+pnpm --filter @workspace/agent-desktop run eval:docker-ui
+```
+
+### Dependency policy
+
+`pnpm-workspace.yaml` sets `minimumReleaseAge: 1440` (1-day quarantine on new npm
+releases) as supply-chain defense — do not lower or remove it. It also pins
+`overrides` stripping every non-`win32-x64` esbuild/rollup/lightningcss/oxide
+binary; installing on macOS or Linux requires removing those overrides first.
 
 ---
 
@@ -40,14 +67,20 @@ pnpm --filter @workspace/db run push
 artifacts/
   api-server/     # Express 5 API, built with esbuild, runs on Node 24
   app/            # React + Vite frontend
+  agent-runtime/  # Headless coding-agent library (model adapters, Docker sandbox, tools, evals)
+  agent-desktop/  # Electron harness driving AgentRuntime; the lab for agent work
+  mockup-sandbox/ # Standalone Vite playground for UI mockups; not wired into the app
 lib/
   api-spec/       # Source of truth: openapi.yaml + orval codegen config
   api-client-react/ # Generated: TanStack Query hooks (do not edit by hand)
   api-zod/        # Generated: Zod request/response schemas (do not edit by hand)
   db/             # Drizzle ORM schema + db client; source of truth for DB shape
-  integrations/
-    openrouter_ai_integrations/ # OpenRouter AI client (server-side only)
+  integrations-openrouter-ai/ # @workspace/integrations-openrouter-ai (server-side only)
+scripts/          # One-off tsx scripts
 ```
+
+`lib/integrations/openrouter_ai_integrations/` is a stale leftover with no
+`package.json` — it is not a workspace and nothing imports it. Don't add code there.
 
 ### API Contract Flow
 
@@ -78,8 +111,9 @@ PostgreSQL + Drizzle ORM. Schema lives in `lib/db/src/schema/`. All timestamps u
 
 ### AI
 
-- Model: `google/gemini-2.5-flash-lite` via OpenRouter.
-- Token limits: 8192 (node map generation), 2048 (chat), 1024 (opening message), 512 (spawn/summary).
+- Model: `google/gemini-3.1-flash-lite` via OpenRouter.
+- Token limits: 8192 (node map generation, `aiNodeMap.ts`), 16384 (chat streaming, `aiNodeChat.ts` — raised from 2048 to fit the structured `[STEPS_UPDATE]`/`[SPAWN_*]`/`[CHAT]` response format), 8192 (opening message), 4096 (lazy per-step detail, and `aiVisualize.ts`), 512 (spawn/summary).
+- A stream that ends with a `finish_reason` other than `"stop"` (i.e. truncated at `max_tokens`) is treated as a failure, not a partial success — don't "fix" that by swallowing it.
 - SSE chat event format:
   ```
   data: {"type": "chunk", "content": "..."}
@@ -103,3 +137,32 @@ PostgreSQL + Drizzle ORM. Schema lives in `lib/db/src/schema/`. All timestamps u
 ### API Spec Title
 
 The `openapi.yaml` title **must stay `"Api"`** — the codegen output filename (`api.ts`) and imports in `lib/api-client-react` depend on it.
+
+---
+
+## Coding Agent (`artifacts/agent-runtime/`)
+
+The public boundary is intentionally narrow:
+
+```ts
+interface AgentRuntime {
+  runTurn(input: AgentTurnInput): AsyncIterable<AgentEvent>;
+  cancel(runId: string): Promise<void>;
+}
+```
+
+Import only from the package root (`src/index.ts`) — never reach into Docker,
+OpenRouter, or individual tools directly; those are harness internals. The
+trusted control plane (model routing, command policy, budgets, staged-edit
+limits, approvals) is separated from the untrusted execution plane (project
+source, dependencies, test/build processes), which never receives app secrets or
+DB credentials. Edits are *staged* and returned as a bounded diff — never written
+into a real workspace. Before changing the agent, read `CLAUDE_HANDOFF.md`,
+`CODING_AGENT_PROCESS.md`, and `AGENT_PLAN.md`.
+
+---
+
+## Sibling instruction files
+
+`CLAUDE.md` and `AGENTS.md` (Codex) cover the same ground and are authoritative.
+When you change a convention here, mirror it in both.

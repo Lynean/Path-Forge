@@ -56,7 +56,8 @@ const TOOL_LABELS: Record<string, string> = {
   run_in_environment: "Ran in custom environment",
   prepare_python_dependencies: "Prepared dependencies",
   apply_patch: "Proposed an edit",
-  update_step: "Proposed a step change",
+  update_step_description: "Updated step description",
+  regenerate_step_with_notes: "Regenerated step content",
   add_steps: "Proposed new steps",
   spawn_node: "Proposed a new node",
   mark_steps_done: "Marked steps done",
@@ -95,6 +96,7 @@ interface Slide {
   agentNote?: string; // hidden [NOTE:] handoff for per-step generation (never shown)
   detailedContent?: string | null; // null = not loaded, string = loaded/streaming
   detailLoading?: boolean;
+  detailStatus?: string;
 }
 
 interface ChatMessage {
@@ -113,6 +115,17 @@ interface NodeStepLightboxProps {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function friendlyAiError(message: unknown): string {
+  const detail = typeof message === "string" ? message : "";
+  if (/free daily limit reached|daily.*(?:quota|limit)|(?:quota|limit).*daily|\b429\b/i.test(detail)) {
+    return "You've reached today's free AI limit. It resets at 00:00 UTC, or you can add your own OpenRouter key in Profile to continue now.";
+  }
+  if (/api key is not configured/i.test(detail)) {
+    return "AI access is not configured. Add an OpenRouter key in Profile and try again.";
+  }
+  return "Sorry, something went wrong. Please try again.";
+}
 
 function CodeBlock({ className, children }: { className?: string; children?: React.ReactNode }) {
   const match = /language-(\w+)/.exec(className ?? "");
@@ -563,11 +576,26 @@ export function NodeStepLightbox({
 
     // Mark as loading
     setSlides((prev) =>
-      prev.map((s, i) => (i === slideIdx ? { ...s, detailedContent: null, detailLoading: true } : s))
+      prev.map((s, i) =>
+        i === slideIdx
+          ? {
+              ...s,
+              detailedContent: null,
+              detailLoading: true,
+              detailStatus: "Preparing the step generator…",
+            }
+          : s
+      )
     );
 
     stepDetailAbortRef.current?.abort();
-    stepDetailAbortRef.current = new AbortController();
+    const controller = new AbortController();
+    stepDetailAbortRef.current = controller;
+    let timedOut = false;
+    const timeout = window.setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, 150_000);
 
     try {
       const res = await fetch(`${base}/api/projects/${projectId}/nodes/${nodeId}/step-detail`, {
@@ -579,13 +607,20 @@ export function NodeStepLightbox({
           stepBrief: slide.content,
           ...(slide.agentNote ? { stepNote: slide.agentNote } : {}),
         }),
-        signal: stepDetailAbortRef.current.signal,
+        signal: controller.signal,
       });
 
       if (!res.ok || !res.body) {
         setSlides((prev) =>
           prev.map((s, i) =>
-            i === slideIdx ? { ...s, detailedContent: "Failed to load step detail.", detailLoading: false } : s
+            i === slideIdx
+              ? {
+                  ...s,
+                  detailedContent: "Failed to load step detail.",
+                  detailLoading: false,
+                  detailStatus: undefined,
+                }
+              : s
           )
         );
         return;
@@ -611,13 +646,33 @@ export function NodeStepLightbox({
                 // Update progressively while streaming
                 setSlides((prev) =>
                   prev.map((s, i) =>
-                    i === slideIdx ? { ...s, detailedContent: fullContent, detailLoading: true } : s
+                    i === slideIdx
+                      ? {
+                          ...s,
+                          detailedContent: fullContent,
+                          detailLoading: true,
+                          detailStatus: undefined,
+                        }
+                      : s
+                  )
+                );
+              } else if (parsed.type === "status" && typeof parsed.message === "string") {
+                setSlides((prev) =>
+                  prev.map((s, i) =>
+                    i === slideIdx ? { ...s, detailStatus: parsed.message } : s
                   )
                 );
               } else if (parsed.type === "done") {
                 setSlides((prev) =>
                   prev.map((s, i) =>
-                    i === slideIdx ? { ...s, detailedContent: fullContent, detailLoading: false } : s
+                    i === slideIdx
+                      ? {
+                          ...s,
+                          detailedContent: fullContent,
+                          detailLoading: false,
+                          detailStatus: undefined,
+                        }
+                      : s
                   )
                 );
                 // Refresh cache so the persisted detail is available on next open
@@ -629,7 +684,12 @@ export function NodeStepLightbox({
                 setSlides((prev) =>
                   prev.map((s, i) =>
                     i === slideIdx
-                      ? { ...s, detailedContent: "Failed to load step detail.", detailLoading: false }
+                      ? {
+                          ...s,
+                          detailedContent: "Failed to load step detail.",
+                          detailLoading: false,
+                          detailStatus: undefined,
+                        }
                       : s
                   )
                 );
@@ -639,13 +699,34 @@ export function NodeStepLightbox({
         }
       }
     } catch (err: any) {
-      if (err?.name !== "AbortError") {
-        setSlides((prev) =>
-          prev.map((s, i) =>
-            i === slideIdx ? { ...s, detailedContent: "Failed to load step detail.", detailLoading: false } : s
-          )
-        );
-      }
+      setSlides((prev) =>
+        prev.map((s, i) =>
+          i === slideIdx
+            ? timedOut
+              ? {
+                  ...s,
+                  detailedContent: "Step generation timed out. Please try opening this step again.",
+                  detailLoading: false,
+                  detailStatus: undefined,
+                }
+              : err?.name === "AbortError"
+                ? {
+                    ...s,
+                    detailedContent: undefined,
+                    detailLoading: false,
+                    detailStatus: undefined,
+                  }
+                : {
+                    ...s,
+                    detailedContent: "Failed to load step detail.",
+                    detailLoading: false,
+                    detailStatus: undefined,
+                  }
+            : s
+        )
+      );
+    } finally {
+      window.clearTimeout(timeout);
     }
   }, [slides, base, projectId, nodeId]);
 
@@ -745,11 +826,13 @@ export function NodeStepLightbox({
                 setEnvProposal(parsed.proposal as EnvProposal);
                 setEnvApproved(false);
               } else if (parsed.type === "plan_updated" && typeof parsed.openingContent === "string") {
-                // Server has already applied the update_step/regenerate_session/add_steps
+                // Server has already applied the correction/regenerate_session/add_steps
                 // tool call(s) to the canonical session plan and purged the step-detail
                 // pages that are now stale. Re-parse it and, for each step, carry over
                 // cached detail only if that step's own content is byte-identical to
-                // before — this alone correctly covers every action type: an update_step
+                // before — visible content AND the hidden agent note must match.
+                // A regenerate_step_with_notes call intentionally changes only the
+                // hidden note, which must still invalidate the cached detail page.
                 // call that only touches the intro (via its optional introUpdate field)
                 // leaves every step body unchanged (all steps keep their cache), one that
                 // also rewrites a step invalidates just that one, and regenerate_session's
@@ -761,10 +844,19 @@ export function NodeStepLightbox({
                   newSlides.map((s) => {
                     if (s.type !== "step") return s;
                     const old = prev.find(
-                      (p) => p.type === "step" && p.stepNumber === s.stepNumber && p.content === s.content
+                      (p) =>
+                        p.type === "step" &&
+                        p.stepNumber === s.stepNumber &&
+                        p.content === s.content &&
+                        p.agentNote === s.agentNote
                     );
                     return old && old.detailedContent !== undefined
-                      ? { ...s, detailedContent: old.detailedContent, detailLoading: old.detailLoading }
+                      ? {
+                          ...s,
+                          detailedContent: old.detailedContent,
+                          detailLoading: old.detailLoading,
+                          detailStatus: old.detailStatus,
+                        }
                       : s;
                   })
                 );
@@ -800,7 +892,7 @@ export function NodeStepLightbox({
           ...prev,
           {
             role: "assistant" as const,
-            content: "Sorry, something went wrong. Please try again.",
+            content: friendlyAiError(streamError),
             createdAt: new Date().toISOString(),
           },
         ]);
@@ -840,7 +932,7 @@ export function NodeStepLightbox({
           ...prev,
           {
             role: "assistant" as const,
-            content: "Sorry, something went wrong. Please try again.",
+            content: friendlyAiError(err?.message),
             createdAt: new Date().toISOString(),
           },
         ]);
@@ -1245,7 +1337,9 @@ export function NodeStepLightbox({
                         {currentSlide.detailLoading && !currentSlide.detailedContent ? (
                           <div className="flex flex-col items-center justify-center py-12 gap-3 text-muted-foreground">
                             <div className="w-7 h-7 border-4 border-primary border-t-transparent rounded-full animate-spin" />
-                            <p className="text-xs font-mono">Generating detailed walkthrough...</p>
+                            <p className="text-xs font-mono">
+                              {currentSlide.detailStatus ?? "Generating detailed walkthrough..."}
+                            </p>
                           </div>
                         ) : currentSlide.detailedContent ? (
                           <div className="text-sm leading-relaxed">

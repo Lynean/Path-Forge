@@ -147,6 +147,7 @@ const EXCLUDED_DIRECTORIES = new Set([
   ".venv",
   "build",
   "dist",
+  "graph",
   "node_modules",
 ]);
 const EXCLUDED_SECRET_FILES = new Set([

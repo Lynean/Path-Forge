@@ -8,7 +8,9 @@
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
     "agent:build-images": "docker build --file artifacts/agent-runtime/docker/Dockerfile --tag pathforge-agent-sandbox:local artifacts/agent-runtime/docker && docker build --file artifacts/agent-runtime/docker/Dockerfile.python --tag pathforge-python-sandbox:local artifacts/agent-runtime/docker",
-    "agent:verify": "pnpm run typecheck && pnpm --filter @workspace/agent-runtime run eval && pnpm --filter @workspace/agent-desktop run eval",
+    "pathforge:cli": "pnpm --filter @workspace/pathforge-cli run start --",
+    "agent:eval-habittracker": "pnpm --filter @workspace/api-server run agent:eval-habittracker",
+    "agent:verify": "pnpm run typecheck && pnpm --filter @workspace/agent-runtime run eval && pnpm --filter @workspace/agent-runtime run verify:code-graph && pnpm --filter @workspace/agent-runtime run verify:project-graph && pnpm --filter @workspace/agent-runtime run verify:graph-search && pnpm run agent:eval-habittracker && pnpm --filter @workspace/agent-desktop run eval",
     "agent:verify:docker": "pnpm --filter @workspace/agent-runtime run eval:docker && pnpm --filter @workspace/agent-runtime run eval:docker:python && pnpm --filter @workspace/agent-runtime run eval:repair && pnpm --filter @workspace/agent-desktop run build && pnpm --filter @workspace/agent-desktop run eval:docker-ui"
   },
   "private": true,

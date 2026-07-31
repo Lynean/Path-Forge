@@ -21,6 +21,10 @@ export interface HarnessRunBudgets {
   /** How many times a malformed tool-argument call is fed back for the model to
    * self-correct before the run is stopped. */
   maxInvalidArgumentRetries: number;
+  /** How many semantic tool execution errors are fed back for self-correction. */
+  maxToolExecutionRetries: number;
+  /** How many unavailable/hallucinated tool names are fed back for correction. */
+  maxUnknownToolRetries: number;
 }
 
 /**
@@ -57,6 +61,8 @@ export const DEFAULT_HARNESS_RUN_BUDGETS: HarnessRunBudgets = {
   maxRunDurationMs: 120_000,
   maxToolDurationMs: 30_000,
   maxInvalidArgumentRetries: 2,
+  maxToolExecutionRetries: 2,
+  maxUnknownToolRetries: 2,
 };
 
 class RunStoppedError extends Error {
@@ -139,6 +145,14 @@ export class AgentHarness implements AgentRuntime {
       maxInvalidArgumentRetries: positiveInteger(
         "maxInvalidArgumentRetries",
         requested.maxInvalidArgumentRetries ?? DEFAULT_HARNESS_RUN_BUDGETS.maxInvalidArgumentRetries,
+      ),
+      maxToolExecutionRetries: positiveInteger(
+        "maxToolExecutionRetries",
+        requested.maxToolExecutionRetries ?? DEFAULT_HARNESS_RUN_BUDGETS.maxToolExecutionRetries,
+      ),
+      maxUnknownToolRetries: positiveInteger(
+        "maxUnknownToolRetries",
+        requested.maxUnknownToolRetries ?? DEFAULT_HARNESS_RUN_BUDGETS.maxUnknownToolRetries,
       ),
     };
   }
@@ -260,9 +274,12 @@ export class AgentHarness implements AgentRuntime {
     const toolCalls: string[] = [];
     const executedCallSignatures = new Set<string>();
     const warnedDuplicateSignatures = new Set<string>();
+    const toolExecutionCounts = new Map<string, number>();
     let toolStateRevision = 0;
     let requestedToolCalls = 0;
     let invalidArgumentAttempts = 0;
+    let toolExecutionErrorAttempts = 0;
+    let unknownToolAttempts = 0;
     let resourcesFinished = false;
     const finishResources = async (): Promise<void> => {
       if (resourcesFinished) return;
@@ -283,10 +300,20 @@ export class AgentHarness implements AgentRuntime {
         if (controller.signal.aborted) throw stoppedFromSignal(controller.signal);
 
         yield { type: "model_turn_started", turn };
+        const availableToolDefinitions = this.options.tools
+          .definitions()
+          .filter((definition) => {
+            const registered = this.options.tools.get(definition.name);
+            if (registered?.maxCallsPerRun === undefined) return true;
+            return (
+              (toolExecutionCounts.get(registered.name) ?? 0) <
+              registered.maxCallsPerRun
+            );
+          });
         const modelContext = {
           input,
           documents,
-          tools: this.options.tools.definitions(),
+          tools: availableToolDefinitions,
           turn,
           observations,
           signal: controller.signal,
@@ -346,11 +373,34 @@ export class AgentHarness implements AgentRuntime {
 
         const tool = this.options.tools.get(decision.call.name);
         if (!tool) {
-          throw new RunStoppedError(
-            "policy_rejected",
-            "UNKNOWN_TOOL",
-            `Model requested unknown tool: ${decision.call.name}`,
-          );
+          unknownToolAttempts += 1;
+          const available = this.options.tools
+            .definitions()
+            .map((definition) => definition.name)
+            .join(", ");
+          const message =
+            `Tool ${decision.call.name} is not available in this turn. ` +
+            `Use only one of: ${available || "(no tools)"}.`;
+          if (unknownToolAttempts > this.budgets.maxUnknownToolRetries) {
+            throw new RunStoppedError(
+              "policy_rejected",
+              "UNKNOWN_TOOL",
+              `${message} (after ${this.budgets.maxUnknownToolRetries} retries)`,
+            );
+          }
+          observations.push({
+            toolCallId: decision.call.id,
+            tool: decision.call.name,
+            arguments: (decision.call.arguments ?? {}) as Record<string, unknown>,
+            output: { error: "UNKNOWN_TOOL", message },
+          });
+          yield {
+            type: "tool_rejected",
+            tool: decision.call.name,
+            code: "UNKNOWN_TOOL",
+            message,
+          };
+          continue;
         }
 
         const parsedArguments = tool.inputSchema.safeParse(decision.call.arguments);
@@ -378,6 +428,29 @@ export class AgentHarness implements AgentRuntime {
             type: "tool_rejected",
             tool: tool.name,
             code: "INVALID_TOOL_ARGUMENTS",
+            message,
+          };
+          continue;
+        }
+
+        const previousToolExecutions = toolExecutionCounts.get(tool.name) ?? 0;
+        if (
+          tool.maxCallsPerRun !== undefined &&
+          previousToolExecutions >= tool.maxCallsPerRun
+        ) {
+          const message =
+            `${tool.name} already reached its ${tool.maxCallsPerRun}-call limit for this turn. ` +
+            "Use the existing observation as evidence and answer the learner now.";
+          observations.push({
+            toolCallId: decision.call.id,
+            tool: tool.name,
+            arguments: parsedArguments.data,
+            output: { error: "TOOL_CALL_LIMIT", message },
+          });
+          yield {
+            type: "tool_rejected",
+            tool: tool.name,
+            code: "TOOL_CALL_LIMIT",
             message,
           };
           continue;
@@ -412,30 +485,80 @@ export class AgentHarness implements AgentRuntime {
         yield { type: "tool_started", tool: tool.name, arguments: parsedArguments.data };
         let output: unknown;
         let receivedOutput = false;
-        for await (const toolEvent of this.executeToolEvents(
-          tool,
-          parsedArguments.data,
-          input.runId,
-          controller.signal,
-        )) {
-          if (toolEvent.type === "progress") {
-            yield {
-              type: "tool_progress",
-              tool: tool.name,
-              stage: toolEvent.stage,
-              message: toolEvent.message,
-            };
-          } else {
-            output = toolEvent.output;
-            receivedOutput = true;
+        try {
+          for await (const toolEvent of this.executeToolEvents(
+            tool,
+            parsedArguments.data,
+            input.runId,
+            controller.signal,
+          )) {
+            if (toolEvent.type === "progress") {
+              yield {
+                type: "tool_progress",
+                tool: tool.name,
+                stage: toolEvent.stage,
+                message: toolEvent.message,
+              };
+            } else {
+              output = toolEvent.output;
+              receivedOutput = true;
+            }
           }
+        } catch (error) {
+          if (error instanceof RunStoppedError || controller.signal.aborted) throw error;
+          toolExecutionErrorAttempts += 1;
+          const detail =
+            error instanceof Error ? error.message : "Unknown tool execution error";
+          const message =
+            `Tool ${tool.name} rejected these arguments during execution: ${detail}. ` +
+            "Correct the arguments or use the existing evidence; do not repeat the same call.";
+          if (toolExecutionErrorAttempts > this.budgets.maxToolExecutionRetries) {
+            throw new RunStoppedError(
+              "policy_rejected",
+              "INVALID_TOOL_ARGUMENTS",
+              `${message} (after ${this.budgets.maxToolExecutionRetries} retries)`,
+            );
+          }
+          observations.push({
+            toolCallId: decision.call.id,
+            tool: tool.name,
+            arguments: parsedArguments.data,
+            output: { error: "TOOL_EXECUTION_ERROR", message },
+          });
+          yield {
+            type: "tool_rejected",
+            tool: tool.name,
+            code: "INVALID_TOOL_ARGUMENTS",
+            message,
+          };
+          continue;
         }
         if (!receivedOutput) throw new Error(`Tool ${tool.name} produced no result`);
+        const currentToolExecutions = previousToolExecutions + 1;
+        toolExecutionCounts.set(tool.name, currentToolExecutions);
+        const reachedToolLimit =
+          tool.maxCallsPerRun !== undefined &&
+          currentToolExecutions >= tool.maxCallsPerRun;
+        const observationOutput = reachedToolLimit
+          ? typeof output === "object" && output !== null && !Array.isArray(output)
+            ? {
+                ...(output as Record<string, unknown>),
+                harnessInstruction:
+                  `${tool.name} has completed and is no longer available this turn. ` +
+                  "Answer the learner now using this exact evidence; do not request another run.",
+              }
+            : {
+                result: output,
+                harnessInstruction:
+                  `${tool.name} has completed and is no longer available this turn. ` +
+                  "Answer the learner now using this exact evidence; do not request another run.",
+              }
+          : output;
         observations.push({
           toolCallId: decision.call.id,
           tool: tool.name,
           arguments: parsedArguments.data,
-          output,
+          output: observationOutput,
         });
         if (tool.invalidatesPriorToolResults?.(output)) {
           toolStateRevision += 1;

@@ -11,14 +11,19 @@ import { runPythonInWasm } from "../../wasm/runPython";
  */
 export class RunPythonTool implements AgentTool {
   readonly name = "run_python";
+  readonly maxCallsPerRun = 1;
   readonly description =
-    "Run Python in a fast isolated WASM sandbox (no Docker needed) and get back stdout, stderr, and any traceback. Use it to check the learner's code for errors, run a script, or verify a snippet. Provide `path` to run a file from the project, or `code` to run a snippet. Pure Python + WASM-available packages only — no system commands, no network, and no display, so graphical/hardware code (pygame, tkinter) errors on the missing environment rather than a real bug; for those, reason from the code instead of running it.";
+    "Run Python ONCE per tutor turn in a fast isolated WASM sandbox and get stdout, stderr, and the exact traceback. Use `path` for a real project file OR `code` for a snippet, never both. After an error, quote the exact traceback/error evidence in your answer instead of running Python again. Pure Python + WASM-available packages only — no system commands, network, or display.";
   readonly inputSchema = z
     .object({
       path: z.string().min(1).optional(),
       code: z.string().min(1).optional(),
     })
-    .strict();
+    .strict()
+    .refine(
+      ({ path, code }) => Boolean(path) !== Boolean(code),
+      "Provide exactly one of path or code.",
+    );
 
   constructor(private readonly workspace: WorkspaceAccess) {}
 

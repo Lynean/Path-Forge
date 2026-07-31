@@ -7,7 +7,28 @@ const MODEL = "google/gemini-3.1-flash-lite";
 function getLangInstruction(profile: LearnerProfile | null): string {
   const lang = profile?.preferredLanguage;
   if (!lang || lang === "English") return "";
-  return `\nIMPORTANT: All human-readable text (questions, descriptions, node briefs, option text) must be written in ${lang}. Node titles and code/technical identifiers must stay in English.`;
+  return `\nIMPORTANT: Write ALL user-visible text in ${lang}, including project titles, node titles, step titles, questions, descriptions, briefs, and option text. Keep only code identifiers, commands, filenames, library/framework names, and other technical terms in their conventional form. Never keep a title in English merely because it contains a technical topic.`;
+}
+
+function statedInterests(profile: LearnerProfile | null): string | null {
+  const match = profile?.profileSummary?.match(/^Interested in:\s*(.+?)(?:\.\s*)?$/m);
+  return match?.[1]?.trim() || null;
+}
+
+function learnerFitInstruction(profile: LearnerProfile | null): string {
+  if (!profile) return "";
+
+  const age = profile.age;
+  const education = profile.educationLevel?.toLowerCase() ?? "";
+  const youngBeginner =
+    (typeof age === "number" && age <= 12) ||
+    /\b(elementary|primary|middle school)\b/.test(education);
+
+  if (youngBeginner) {
+    return `\nHARD FEASIBILITY BOUNDARY: This learner is a child or elementary/primary-level learner. Suggest projects they can complete with short, visual, beginner-friendly steps and minimal prerequisites. Do NOT suggest advanced machine-learning model training, production systems, cloud infrastructure, professional data science, advanced mathematics, or similarly abstract projects unless their profile explicitly demonstrates the required experience. Prefer small interactive programs, visual experiments, simple games, beginner robotics, or guided no-code projects within their stated interests.`;
+  }
+
+  return `\nFEASIBILITY BOUNDARY: Treat age, education, and stated experience as hard constraints, not decorative context. Every project must be realistically completable at the learner's current level with guided learning. Prefer the more conservative difficulty when age/education and experience signals disagree.`;
 }
 
 type ProjectType =
@@ -263,6 +284,7 @@ export async function generateProjectRecommendations(
         profile.educationLevel ? `Education: ${profile.educationLevel}` : null,
         profile.major ? `Field/Major: ${profile.major}` : null,
         profile.profileSummary ? profile.profileSummary : null,
+        profile.preferredLanguage ? `Preferred language: ${profile.preferredLanguage}` : null,
       ]
         .filter(Boolean)
         .join("\n")
@@ -273,6 +295,11 @@ export async function generateProjectRecommendations(
     : "";
 
   const langInstruction = getLangInstruction(profile);
+  const interests = statedInterests(profile);
+  const interestBoundary = interests
+    ? `\nHARD INTEREST BOUNDARY: The learner explicitly selected these interests: ${interests}. ALL 10 recommendations must belong directly to one or more of those interests. Do not add unrelated, adjacent, exploratory, or "broaden your horizons" projects. Diversity must come from different project styles, tools, or difficulty within the selected interests.`
+    : "\nNo explicit interest list is available. Use the rest of the profile to choose relevant domains.";
+  const fitInstruction = learnerFitInstruction(profile);
 
   const prompt = `You are suggesting project ideas to a self-directed learner on a project-based learning platform. Each idea becomes a full personalized learning path if they choose it, so ideas must be genuinely buildable as a self-directed learning project — not a vague concept and not a full commercial product.
 
@@ -281,15 +308,16 @@ ${profileContext ?? "No profile available — suggest a broadly appealing, popul
 ${existingText}
 
 Generate exactly 10 diverse, exciting project ideas tailored to this learner. Requirements:
-- Calibrate difficulty to their stated experience in each area — not trivial if they're experienced, not overwhelming if they're a beginner.
-- Cover a MIX of their stated interests when they have a profile, plus 1–2 stretch/adjacent ideas that broaden their horizons into something adjacent but new.
+- Treat the learner's interests, age, education, and per-interest experience as selection constraints. A trendy project is still a bad recommendation if it does not fit all of them.
+- Calibrate both conceptual difficulty and implementation scope to their stated experience — not trivial if they're experienced, not overwhelming if they're a beginner.
+- When explicit interests are present, cover only those interests. Do not introduce unrelated domains.
 - If there's no profile, spread the 10 across different domains and difficulty levels so there's something for everyone.
-- title: punchy and concrete, max 6 words, no generic buzzwords ("Awesome", "Ultimate").
+- title: punchy and concrete, max 6 words, no generic buzzwords ("Awesome", "Ultimate"), and written in the preferred language.
 - description: exactly 1–2 sentences, concrete about what they'll actually build, written in a motivating/exciting tone that sells why it's worth building.
 - category: pick the single best-fit tag from this exact list (lowercase, exact spelling): ${RECOMMENDATION_CATEGORIES.join(", ")}.
 
 Respond ONLY with valid JSON, no markdown:
-{"recommendations": [{"title": "...", "description": "...", "category": "..."}, ...]} — exactly 10 items.${langInstruction}`;
+{"recommendations": [{"title": "...", "description": "...", "category": "..."}, ...]} — exactly 10 items.${interestBoundary}${fitInstruction}${langInstruction}`;
 
   const response = await openrouter.chat.completions.create({
     model: MODEL,
@@ -368,6 +396,7 @@ Rules for the node map:
   - If they have years of Python/C experience: do NOT include nodes on basic syntax, variables, loops, functions, or I/O. Start from where their knowledge ends.
   - If they mention experience with a framework or tool (e.g. ROS2): treat it as prior knowledge and only include nodes that go beyond what they stated.
   - Focus the map on the GAPS between their current knowledge and what the project requires.
+- Calibrate every node's scope, prerequisites, tools, and wording to the learner's age and education as well as their technical experience. The path must make the chosen project realistically achievable for this learner, not merely describe an expert implementation.
 - Cover the relevant technology stack and concepts needed to build the project (e.g., data structures, networking, robotics frameworks, web APIs, etc.).
 - Order thoughtfully: fundamentals before advanced topics, independent skills in parallel branches, theory paired with hands-on implementation.
 - Avoid duplicate or near-duplicate nodes. If two candidate nodes produce the same artifact or verify the same outcome, consolidate them into one focused node.

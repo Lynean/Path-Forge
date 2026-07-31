@@ -61,3 +61,11 @@ Thumbs.db
 # Electron packaging outputs
 artifacts/agent-desktop/pkg/
 artifacts/agent-desktop/release/
+
+# Generated protected code-search index
+/graph/*.json
+*.code-graph.json
+
+# Local agent retest state and package-manager cache
+/.retest/
+/.pnpm-store/

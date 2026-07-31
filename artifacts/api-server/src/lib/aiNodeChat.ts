@@ -1,5 +1,9 @@
 import { openrouter } from "@workspace/integrations-openrouter-ai";
 import type { LearnerProfile, Node as DbNode, CodeFile } from "@workspace/db";
+import {
+  formatRelevantCodeContext,
+  type RelevantCodeContext,
+} from "./relevantCodeContext";
 
 const MODEL = "google/gemini-3.1-flash-lite";
 
@@ -37,7 +41,7 @@ export interface ChatMessage {
   tools?: { tool: string; detail?: string }[];
 }
 
-interface MapContext {
+export interface MapContext {
   allNodes: { id: number; title: string; brief: string; status: string; summary?: string | null }[];
   allEdges: { fromNodeId: number; toNodeId: number }[];
 }
@@ -67,13 +71,20 @@ function extractMinistepsFromHistory(history: ChatMessage[]): string[] {
  * pages (plus the plan's own snippets) — the cheap part — so the tutor can reuse
  * the exact identifiers the steps established.
  */
-export function extractStepCodeCells(history: ChatMessage[]): string {
+export function extractStepCodeCells(history: ChatMessage[], beforeStepIndex?: number): string {
   const cells: string[] = [];
   const seen = new Set<string>();
   for (const m of history) {
     if (m.role !== "assistant") continue;
     const stepMatch = /^\[STEP_DETAIL:(\d+)\]/.exec(m.content);
     if (!stepMatch && !m.content.includes("[SLIDE:")) continue;
+    if (
+      stepMatch &&
+      typeof beforeStepIndex === "number" &&
+      Number(stepMatch[1]) >= beforeStepIndex
+    ) {
+      continue;
+    }
     const label = stepMatch ? `Step ${stepMatch[1]}` : "Session plan";
     for (const block of m.content.matchAll(/```([a-zA-Z0-9+#-]*)\n([\s\S]*?)```/g)) {
       const lang = block[1].toLowerCase();
@@ -371,7 +382,7 @@ ${stepCode?.trim() ? `
 \`\`\`
 ${stepCode.trim()}
 \`\`\`
-Binding rule: reuse these EXACT identifiers — variable names, function names, file names, signatures — whenever you discuss, extend, correct, or debug this code. Never rename or re-derive them from scratch, and never introduce a parallel version under a different name; the learner's screen shows the code above. If one of these names is genuinely wrong, say so explicitly and call update_step, rather than silently answering with a different name.
+Binding rule: reuse these EXACT identifiers — variable names, function names, file names, signatures — whenever you discuss, extend, correct, or debug this code. Never rename or re-derive them from scratch, and never introduce a parallel version under a different name; the learner's screen shows the code above. If the visible step goal is wrong, call update_step_description. If its detailed code or walkthrough is wrong while the goal is still correct, call regenerate_step_with_notes. Never silently answer with a parallel version.
 ` : ""}${checklistSection}
 ${olderHistorySection}
 ${contextSyncSection}
@@ -420,9 +431,19 @@ ${teachingApproachSection}
 
 Your text reply is always the conversational answer to the learner (or, if you're only taking action with nothing to answer, a short 1–2 sentence note on what you did and why). Never leave it empty. Call tools alongside it — in the same turn — whenever the situation genuinely calls for one:
 
+CURRENT CORRECTION TOOLS (these replace the obsolete update_step wording below):
+- **update_step_description** — use ONLY when the visible step title or short description no longer states the correct goal or scope. Pass stepNumber and a precise reason; a dedicated pass rewrites title/description while preserving its DONE/NEXT handoff.
+- **regenerate_step_with_notes** — use when title/description remain correct but the detailed walkthrough is wrong, incomplete, contradicts an earlier step, removes prior code, or changes established identifiers. Pass stepNumber and a precise issueNote. The backend preserves title/description and DONE/NEXT, attaches the issue, and regenerates using earlier canonical code.
+- **Mandatory reflection rule** — whenever the learner reports, notices, questions, or reflects that a step is wrong or inconsistent, call the appropriate correction tool in that SAME turn. They do not need to say "update the step." Merely acknowledging the issue is incomplete. Keep your text reply to at most ONE short sentence stating what you corrected; never restate the whole step.
+
+${false ? `
 - **update_step** — the learner asks to change one or more steps, a step is clearly wrong, OR you realize something YOU said earlier (a command, a fact, an approach) was incorrect or misleading and it affects how a step should be done. This includes recommending a different tool, language, framework, library, dataset, board/hardware, or environment than what a step originally assumed — e.g. you determine partway through the conversation that the learner's hardware can't run a required library, or their chosen tool/plan doesn't support something the step depends on. That is a self-correction just as much as a wrong fact, and it is NOT satisfied by just mentioning the change in your text reply. You do NOT write the step's new title/description yourself — pass stepNumber and a clear, specific reason (what changed and why, including any concrete new facts — the specific tool/board/file/approach now in play), and a dedicated backend pass writes the new title/brief from that reason plus the step's current content and the other steps in the plan, so the rewrite stays consistent with the rest of the session instead of depending on whatever else was in this chat turn. A vague reason produces a vague step — be as specific as you would be if you were writing the step yourself. Call it once per step that needs to change — never resend a step that's still correct, and never call it for steps that don't need changing. When you flag step N, also check the steps AFTER it: later steps often build on the same fact, file, directory, tool, or approach you're correcting, even if the learner's message only called out step N by name — a directory rename, tool swap, or corrected assumption at step N frequently still applies at step N+1, N+2, etc. Call update_step for each later step that's now wrong too, in the same turn, rather than assuming "the learner only asked about step N so the rest must be fine." The intro/overview is NOT a step — never target it with a stepNumber. If the step change also makes the session overview wrong or outdated, include introUpdate (written directly by you, in full) in that same update_step call to fix both together. Treat needing an introUpdate as a signal to look harder, not narrower: if the overview itself is wrong, the correction is usually project-wide, not confined to whichever step you were just discussing — re-check every step in the plan, not only the ones the learner explicitly mentioned, and call update_step for each one that's now wrong. There is no standalone way to edit only the intro — it's only ever updated alongside a step change (via introUpdate) or as part of regenerate_session.
 
 - **regenerate_session** — RARE. Only when a foundational assumption changed broadly enough to likely affect MULTIPLE steps: environment/tooling swapped, a directory/naming convention changed, the project's architecture pivoted. For a single wrong step (with or without an overview tweak), use update_step instead — it's cheaper and more precise. You don't write the new intro or steps yourself here, just the reason — a dedicated backend pass rebuilds the entire plan (intro AND every step) reading the full conversation so far, so corrections and facts established anywhere in the chat carry through consistently everywhere they're relevant, not just patched into the intro while steps still silently reference old, wrong facts. Costly: every step's generated detail page is invalidated and regenerates next time the learner opens it.
+
+` : ""}
+
+- **regenerate_session** — RARE. Use only when a foundational assumption changed across multiple steps. For one wrong step use update_step_description or regenerate_step_with_notes.
 
 - **add_steps** — you identify steps that are missing from the current session and should be appended.
 
@@ -520,25 +541,36 @@ export function applyCodeContextUpdates(
 }
 
 export interface ChatToolCall {
-  name: "update_step" | "regenerate_session" | "add_steps" | "spawn_node" | "mark_steps_done";
+  name:
+    | "update_step_description"
+    | "regenerate_step_with_notes"
+    | "regenerate_session"
+    | "add_steps"
+    | "spawn_node"
+    | "mark_steps_done";
   args: Record<string, unknown>;
 }
 
 const KNOWN_TOOL_NAMES = new Set<ChatToolCall["name"]>([
-  "update_step", "regenerate_session", "add_steps", "spawn_node", "mark_steps_done",
+  "update_step_description",
+  "regenerate_step_with_notes",
+  "regenerate_session",
+  "add_steps",
+  "spawn_node",
+  "mark_steps_done",
 ]);
 
 const CHAT_TOOLS = [
   {
     type: "function" as const,
     function: {
-      name: "update_step",
-      description: "Flag a specific step as needing to change, with a clear reason — you do NOT write the new title/description yourself. Call this when the learner asks to change a step, a step is clearly wrong, or you're self-correcting something you said earlier that affects that step — including a different tool, language, framework, dataset, board/hardware, or environment than the step originally assumed. Mentioning the change in your text reply is not enough; the reason you give here drives a dedicated rewrite of the step's title/description, or the learner will later see a step that still teaches the old, wrong approach. When you flag one step, also check the steps AFTER it in the plan — they often build on the same fact/file/tool/approach even if the learner only asked about this one step, so call this tool again for each later step that's now wrong too. There is no separate tool for editing the intro/overview alone — if this step's change also makes the session overview text wrong or outdated (e.g. the overview mentions the same fact you're correcting), include introUpdate (written by you, in full) in this same call to fix both together; and if the overview itself needs updating, that's usually a sign the correction runs through most or all steps, not just this one — check every step, not only the ones already discussed.",
+      name: "update_step_description",
+      description: "Use ONLY when a step's visible title or short description states the wrong goal or scope. Call proactively when the learner reports the mismatch; they do not need to explicitly request an update. A dedicated pass rewrites title/description while preserving DONE/NEXT. Check later dependent steps too. Keep the text reply to one short sentence.",
       parameters: {
         type: "object",
         properties: {
-          stepNumber: { type: "integer", description: "1-based step number to replace, matching the numbering the learner sees (the intro/overview is not a step — use introUpdate for that, never a stepNumber)" },
-          reason: { type: "string", description: "Specific explanation of what changed and why, including any concrete new facts (the specific tool/board/file/approach now in play) — this text is the ONLY input used to write the step's new title/description, so be as precise as you'd be if writing it yourself. A vague reason produces a vague step." },
+          stepNumber: { type: "integer", description: "1-based step number whose title/description is wrong" },
+          reason: { type: "string", description: "Precisely what the visible goal or scope should say differently and why" },
           introUpdate: { type: "string", description: "Optional. Only include this if the session's overview/intro text also needs to change as a result of this step's update. Write the full replacement intro text yourself — this one IS authored directly by you, unlike the step title/description above. Omit entirely if the overview is still accurate." },
         },
         required: ["stepNumber", "reason"],
@@ -548,8 +580,23 @@ const CHAT_TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "regenerate_step_with_notes",
+      description: "Use when title/description are correct but the detailed content or code is wrong, incomplete, contradicts an earlier step, removes prior code, or changes established identifiers. Call proactively as soon as the learner reflects the problem. The original title/description and DONE/NEXT notes are preserved; issueNote guides regeneration. Keep the text reply to one short sentence.",
+      parameters: {
+        type: "object",
+        properties: {
+          stepNumber: { type: "integer", description: "1-based step number whose detailed page must regenerate" },
+          issueNote: { type: "string", description: "Concrete defect to fix, including prior fields/functions/identifiers that must remain" },
+        },
+        required: ["stepNumber", "issueNote"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "regenerate_session",
-      description: "RARE. Rebuild the entire session plan (intro + every step) from scratch because a foundational assumption changed broadly enough to likely affect multiple steps: environment/tooling swapped, a directory/naming convention changed, the project's architecture pivoted. For a single wrong step, use update_step instead — it's cheaper and more precise.",
+      description: "RARE. Rebuild the entire session plan because a foundational assumption changed across multiple steps. For one wrong step use update_step_description or regenerate_step_with_notes.",
       parameters: {
         type: "object",
         properties: {
@@ -727,7 +774,8 @@ export function buildOpeningMessagePrompt(
   recentConcerns: string[],
   codeFiles: CodeFile[],
   regeneration?: { reason: string; facts: string[] },
-  liveInspection?: string
+  liveInspection?: string,
+  relevantCode?: RelevantCodeContext,
 ): { systemPrompt: string; userPrompt: string } {
   const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, recentConcerns, codeFiles);
 
@@ -769,8 +817,17 @@ Ground every step in this real state: reference the actual files/functions, skip
 `
     : "";
 
+  const exactWorkspaceCode = formatRelevantCodeContext(relevantCode);
+  const exactWorkspaceSection = exactWorkspaceCode
+    ? `\n## Exact excerpts from the learner's CURRENT workspace (highest authority)
+${exactWorkspaceCode}
+
+These excerpts are copied verbatim from the current local files. They override older generated lesson snippets, cached code context, summaries, and assumptions whenever those sources disagree. Preserve the actual implementation style and identifiers. Never tell the learner to "ensure" their code matches a different reconstructed version.
+`
+    : "";
+
   const userPrompt = `[Opening message for node: "${node.title}"]
-${regenerationSection}${plannerGuidance}${liveInspectionSection}
+${regenerationSection}${plannerGuidance}${liveInspectionSection}${exactWorkspaceSection}
 Generate a structured session plan using EXACTLY this format with the slide markers. Do not add any text before [SLIDE:intro].
 
 [SLIDE:intro]
@@ -791,6 +848,8 @@ ${isExplainerNode ? "Explain this concept/idea clearly with concrete examples. B
 (Continue for all steps — aim for 3–6 steps total. Each step should represent ~5–10 minutes of focused work.)
 
 Each step's title and description must be distinct and specific to what THAT step covers — never reuse or paraphrase another step's wording, and never let a later step just restate step 1.
+ATOMIC DELIVERABLE RULE: assign exactly one implementation responsibility to each step. If a later step owns persistence, validation, output, testing, or filling in a function body, every earlier step must stop before that action. For example, a step that initializes a dictionary must not also call the save helper when the next step is "Persist changes"; a step that defines a function must leave a placeholder when the next step implements its logic.
+NO VERIFICATION-ONLY CLEANUP STEPS: do not create a later step whose only job is to review code that an earlier step already completed. Move integration/testing into a distinctly named final verification step only after every preceding step has a unique unfinished deliverable.
 SETUP RULE: creating the project folder and the virtual environment each happen in AT MOST ONE step in the whole session, and never in a later step once done. If a previous node already handled the environment/folder (see the completed nodes and the real project state above), do NOT include a folder- or env-creation step here at all — start from the code.
 Every [SLIDE:N] step MUST end with its own [NOTE: ...] line exactly as shown. The note is stripped before the learner sees the step and is the ONLY context the per-step writer gets about what the other steps already did — so it is how you prevent duplicated setup.
 
@@ -811,10 +870,11 @@ export async function* streamOpeningMessage(
   recentConcerns: string[],
   codeFiles: CodeFile[],
   regeneration?: { reason: string; facts: string[] },
-  liveInspection?: string
+  liveInspection?: string,
+  relevantCode?: RelevantCodeContext,
 ): AsyncGenerator<string> {
   const { systemPrompt, userPrompt } = buildOpeningMessagePrompt(
-    node, project, profile, mapCtx, recentConcerns, codeFiles, regeneration, liveInspection
+    node, project, profile, mapCtx, recentConcerns, codeFiles, regeneration, liveInspection, relevantCode
   );
 
   const stream = await openrouter.chat.completions.create({
@@ -830,7 +890,7 @@ export async function* streamOpeningMessage(
   yield* consumeCompletionStream(stream);
 }
 
-export async function* streamStepDetail(
+export function buildStepDetailPrompt(
   node: DbNode,
   project: { title: string; ideaPrompt: string },
   profile: LearnerProfile | null,
@@ -841,9 +901,12 @@ export async function* streamStepDetail(
   stepBrief: string,
   // Agent-facing note the overview baked for THIS step (stripped from the learner's
   // view): what earlier steps already set up, and the exact file/function to touch
-  // next. It's the per-step writer's only view of what the sibling steps did.
-  stepNote?: string
-): AsyncGenerator<string> {
+  // next. Earlier generated code is supplied separately as cumulative canonical
+  // state so a later step cannot silently remove fields/functions from it.
+  stepNote?: string,
+  priorStepCode = "",
+  relevantCode?: RelevantCodeContext,
+): { systemPrompt: string; userPrompt: string } {
   const systemPrompt = buildRichSystemPrompt(node, project, profile, mapCtx, [], codeFiles);
 
   const isExplainer = /understand|concept|what is|how does|introduc|overview|fundament|theory|explain|learn about/i.test(
@@ -854,19 +917,23 @@ export async function* streamStepDetail(
     ? `\nIMPORTANT: Respond entirely in ${profile.preferredLanguage}. Code, commands, and technical terms may stay in English.`
     : "";
 
-  // Scoped to this step's own title/brief plus the overview's baked per-step note.
-  // The note is the ONLY sibling context — it tells the writer what earlier steps
-  // already set up so this page doesn't tell the learner to redo folder/env/file
-  // creation. A correction via update_step rewrites title/brief and still fully
-  // determines the content.
+  // Scoped to this step's own title/brief, the overview's DONE/NEXT handoff, and
+  // the exact code cells already shown on earlier step pages.
   const noteSection = stepNote?.trim()
-    ? `\n## Handoff note (DONE = already set up by earlier steps; NEXT = what later steps will cover)\n${stepNote.trim()}\n\nTreat everything under DONE as finished — build on it, never tell the learner to redo it. Treat everything under NEXT as OUT OF SCOPE for this page: stop at this step's boundary and do not implement the later steps' work here, even if it feels incomplete.\n`
+    ? `\n## Handoff note (DONE = already set up by earlier steps; NEXT = what later steps will cover)\n${stepNote.trim()}\n\nTreat everything under DONE as finished — build on it, never tell the learner to redo it. Treat everything under NEXT as OUT OF SCOPE for this page: stop at this step's boundary and do not implement the later steps' work here, even if it feels incomplete. If the note contains CORRECTION ISSUE, fixing that issue is mandatory while keeping the same step title and brief.\n`
+    : "";
+  const priorCodeSection = priorStepCode.trim()
+    ? `\n## Code from EARLIER lesson steps (preserve unless the current workspace contradicts it)\n\`\`\`\n${priorStepCode.trim()}\n\`\`\`\n\nThis is code the learner was shown before this step. Preserve it when it remains consistent with the current workspace. If exact current-workspace evidence below differs, the workspace wins: build from what is actually in the file and do not silently replace it with this older lesson version. If you show only an insertion fragment, state exactly where it goes and explicitly say the rest stays unchanged. Never use an ellipsis placeholder that makes existing code appear deleted.\n`
+    : "";
+  const exactWorkspaceCode = formatRelevantCodeContext(relevantCode);
+  const exactWorkspaceSection = exactWorkspaceCode
+    ? `\n## Exact code from the bounded CURRENT-WORKSPACE fallback (HIGHEST AUTHORITY)\n${exactWorkspaceCode}\n\nThese exact excerpts were copied from the attached project. They override earlier lesson code, cached code context, DONE/NEXT summaries, and model assumptions whenever they conflict. Continue from this exact implementation style, constructor, fields, functions, components, and identifiers. Do not rewrite it into a dataclass, hook, component pattern, or other design unless this step explicitly teaches that migration and explains it.\n`
     : "";
   const prompt = `You are generating the detailed content page for step ${stepIndex} of the session on "${node.title}".
 
 ## This step
 **${stepTitle}** — ${stepBrief}
-${noteSection}
+${noteSection}${priorCodeSection}${exactWorkspaceSection}
 ## Your task
 Write a detailed, self-contained content page for this step. Structure it as follows:
 
@@ -893,16 +960,49 @@ Rules:
 - Keep every explanation short and concrete — no padding.
 - Code blocks must have correct language tags (\`\`\`bash, \`\`\`ts, etc.).
 - Never repeat content from other steps — stay focused on this step only.
+- Code is cumulative across steps: never replace an earlier complete class or file with a new snippet that silently omits existing members.
 - If the handoff note says the folder, virtual environment, or a file already exists, treat it as ALREADY DONE: build on it, never tell the learner to create it again.
 - Respect this step's scope: implement ONLY what this step's title/brief covers. If the note lists later steps, leave their work to them — a step that says "define the function" writes the signature and a placeholder body, not the full logic.
+- Treat the authoritative later-step list as a hard deny-list. Do not show, call, or implement a helper/action owned by a later step. End with a placeholder or explicit handoff instead. A later step must still have real unfinished implementation work after this page is completed.
+- Treat authoritative future-node boundaries as an equally hard deny-list. You may explain how this step prepares for those nodes, but you must not implement their command handlers, UI, persistence, algorithms, tests, or integrations here.
 - Use LaTeX math notation ($...$ for inline, $$...$$ for block) for any formulas or equations.${langNote ? `\n${langNote}\n- IMPORTANT: Translate ALL section headings (e.g. "What you'll build", "Sub-steps", "Expected result", "If something goes wrong", "What you'll understand", "The core idea", "Breaking it down", "Worked example", "Common misconception") into the target language. Only code, commands, and technical identifiers stay in English.` : ""}`;
+
+  return { systemPrompt, userPrompt: prompt };
+}
+
+export async function* streamStepDetail(
+  node: DbNode,
+  project: { title: string; ideaPrompt: string },
+  profile: LearnerProfile | null,
+  mapCtx: MapContext,
+  codeFiles: CodeFile[],
+  stepIndex: number,
+  stepTitle: string,
+  stepBrief: string,
+  stepNote?: string,
+  priorStepCode = "",
+  relevantCode?: RelevantCodeContext,
+): AsyncGenerator<string> {
+  const { systemPrompt, userPrompt } = buildStepDetailPrompt(
+    node,
+    project,
+    profile,
+    mapCtx,
+    codeFiles,
+    stepIndex,
+    stepTitle,
+    stepBrief,
+    stepNote,
+    priorStepCode,
+    relevantCode,
+  );
 
   const stream = await openrouter.chat.completions.create({
     model: MODEL,
     max_tokens: 4096,
     messages: [
       { role: "system", content: systemPrompt },
-      { role: "user", content: prompt },
+      { role: "user", content: userPrompt },
     ],
     stream: true,
   });
@@ -1042,16 +1142,17 @@ interface StepUpdateResult {
   brief: string;
 }
 
-// Phase 1 of the two-phase step-update flow: the chat model only flags WHICH step needs
-// to change and WHY (via the update_step tool's stepNumber + reason) — it does not author
+// Phase 1 of the two-phase description-update flow: the chat model only flags WHICH step
+// has the wrong visible goal and WHY (via update_step_description) — it does not author
 // the new title/brief itself. This dedicated, narrowly-scoped call writes the new
 // title/brief, so its quality/consistency doesn't depend on whatever else was in the main
 // chat turn's context. Phase 2 (streamStepDetail) then regenerates the step's detail page
 // from ONLY this new title/brief — so the brief produced here must be concise but
 // self-contained enough to drive that regeneration on its own.
-export async function generateStepUpdate(
+export async function generateStepDescriptionUpdate(
   node: DbNode,
   project: { title: string; ideaPrompt: string },
+  profile: LearnerProfile | null,
   reason: string,
   currentStep: { title: string; brief: string },
   siblingSteps: { title: string; brief: string }[]
@@ -1078,7 +1179,7 @@ Write the NEW title and brief for ONLY the step above, reflecting the reason for
 - The brief is the ONLY context that will be used to generate this step's full detailed walkthrough later — nothing else from this conversation carries forward. It must be concise but complete: capture every fact/decision from the reason above that changes what the learner will actually do in this step (e.g. a specific tool, board, file path, or approach), not just a vague restatement of the old brief.
 
 Respond ONLY with valid JSON, no markdown:
-{"title": "...", "brief": "..."}`;
+{"title": "...", "brief": "..."}${getLanguageInstruction(profile)}`;
 
   const response = await openrouter.chat.completions.create({
     model: MODEL,
@@ -1110,6 +1211,7 @@ export async function generateSpawnedNode(
   topic: string
 ): Promise<SpawnedNode> {
   const profileContext = buildProfileContext(profile);
+  const languageInstruction = getLanguageInstruction(profile);
 
   const prompt = `You are designing a single extra learning node for a curriculum.
 
@@ -1123,9 +1225,10 @@ Generate ONE extra learning node that:
 - Has a short title (max 8 words) and a 1-2 sentence brief description
 - Is appropriately scoped (not too broad, not too narrow)
 - Is tailored to the learner's level
+- Uses the learner's preferred language for both the title and brief
 
 Respond ONLY with valid JSON, no markdown:
-{"title": "...", "brief": "..."}`;
+{"title": "...", "brief": "..."}${languageInstruction}`;
 
   const response = await openrouter.chat.completions.create({
     model: MODEL,
@@ -1162,6 +1265,7 @@ export async function revisePlanNodes(
   description: string
 ): Promise<RevisePlanResult> {
   const profileContext = buildProfileContext(profile);
+  const languageInstruction = getLanguageInstruction(profile);
 
   const completedNodes = currentNodes
     .filter((n) => n.status === "completed")
@@ -1210,6 +1314,7 @@ Revise the future nodes to better match this direction. Rules:
 13. If completed nodes are semantically out of order, preserve them as completed historical evidence, but make the remaining path explicitly correct. Do not make future nodes depend on a completed checkpoint that the learner says should have occurred later.
 14. Do not create duplicate or near-duplicate future nodes. If two future nodes cover the same outcome (for example provisioning/configuring NocoDB, importing/activating n8n, wiring n8n workflow logic, refactoring, deployment readiness, testing, or documentation), consolidate them into one node and reuse the most appropriate existing node ID.
 15. When aligning with a real implementation, remove future nodes whose work is already represented by completed nodes or completed external evidence, unless they are explicitly about final audit or verification.
+16. Write every revised or new node title and brief in the learner's preferred language. Preserve code identifiers, filenames, and conventional technical names.
 
 Respond ONLY with valid JSON, no markdown:
 {
@@ -1217,7 +1322,7 @@ Respond ONLY with valid JSON, no markdown:
     {"id": "n5", "title": "...", "brief": "...", "prerequisite_ids": ["n3", "n4"]},
     {"id": "new1", "title": "...", "brief": "...", "prerequisite_ids": ["n5"]}
   ]
-}`;
+}${languageInstruction}`;
 
   const response = await openrouter.chat.completions.create({
     model: MODEL,

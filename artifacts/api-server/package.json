@@ -20,7 +20,9 @@
     "agent:verify-propose-environment": "tsx src/lib/agent/tools/verify-propose-environment.ts",
     "agent:verify-custom-environment": "tsx src/lib/agent/verify-custom-environment.ts",
     "agent:verify-run-in-environment": "tsx src/lib/agent/tools/verify-run-in-environment.ts",
-    "agent:verify-observation-compaction": "tsx src/lib/agent/verify-observation-compaction.ts"
+    "agent:verify-observation-compaction": "tsx src/lib/agent/verify-observation-compaction.ts",
+    "agent:verify-relevant-code": "tsx src/lib/verify-relevant-code-context.ts",
+    "agent:eval-habittracker": "tsx src/lib/agent/evals/habittracker-replay.ts"
   },
   "dependencies": {
     "@clerk/express": "^2.1.31",

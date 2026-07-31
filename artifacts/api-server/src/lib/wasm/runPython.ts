@@ -1,4 +1,6 @@
 import { Worker } from "node:worker_threads";
+import { createRequire } from "node:module";
+import { dirname } from "node:path";
 
 export interface RunPythonResult {
   stdout: string;
@@ -19,15 +21,16 @@ export interface RunPythonOptions {
 // issues; `pyodide` is resolved from node_modules at runtime (esbuild-external).
 const WORKER_SOURCE = `
 const { parentPort } = require("node:worker_threads");
-const path = require("node:path");
-parentPort.once("message", async ({ code }) => {
+const { pathToFileURL } = require("node:url");
+parentPort.once("message", async ({ code, modulePath, indexURL }) => {
   let stdout = "";
   let stderr = "";
   try {
     // Point Pyodide at its own package dir so it finds pyodide.asm.wasm and the
-    // python stdlib bundle (auto-detection fails from an eval'd worker).
-    const indexURL = path.dirname(require.resolve("pyodide"));
-    const { loadPyodide } = await import("pyodide");
+    // python stdlib bundle. Resolve the package from THIS source module in the
+    // parent: an eval worker launched from a monorepo root cannot see a
+    // workspace package's private node_modules through bare-specifier lookup.
+    const { loadPyodide } = await import(pathToFileURL(modulePath).href);
     const pyodide = await loadPyodide({ indexURL });
     pyodide.setStdout({ batched: (s) => { stdout += s + "\\n"; } });
     pyodide.setStderr({ batched: (s) => { stderr += s + "\\n"; } });
@@ -43,6 +46,10 @@ parentPort.once("message", async ({ code }) => {
   }
 });
 `;
+
+const requireFromThisModule = createRequire(import.meta.url);
+const PYODIDE_MODULE_PATH = requireFromThisModule.resolve("pyodide/pyodide.mjs");
+const PYODIDE_INDEX_URL = dirname(PYODIDE_MODULE_PATH);
 
 /**
  * Runs Python code in an isolated WASM (Pyodide) sandbox in a worker thread,
@@ -79,6 +86,10 @@ export function runPythonInWasm(
       finish({ stdout: "", stderr: "", error: String(err?.message ?? err), timedOut: false });
     });
 
-    worker.postMessage({ code });
+    worker.postMessage({
+      code,
+      modulePath: PYODIDE_MODULE_PATH,
+      indexURL: PYODIDE_INDEX_URL,
+    });
   });
 }

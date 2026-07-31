@@ -5,6 +5,8 @@ export interface AgentTool {
   readonly name: string;
   readonly description: string;
   readonly inputSchema: z.ZodType<Record<string, unknown>>;
+  /** Optional hard per-run cap enforced by the harness before execution. */
+  readonly maxCallsPerRun?: number;
   execute(arguments_: Record<string, unknown>, context?: AgentToolContext): Promise<unknown>;
   executeStream?(
     arguments_: Record<string, unknown>,
