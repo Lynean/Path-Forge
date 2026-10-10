@@ -1,0 +1,209 @@
+[
+  {
+    "id": "b01", "title": "Nguyên tắc cốt lõi: người tạo không tự duyệt", "layout": "flow",
+    "nodes": [
+      {"id": "maker", "label": "Người / AI tạo artifact", "kind": "actor", "src": "§1"},
+      {"id": "art", "label": "Artifact: spec, code, test", "kind": "data", "src": "§1"},
+      {"id": "proof", "label": "Bằng chứng chạy thật", "kind": "data", "src": "§1"},
+      {"id": "rev", "label": "Người KHÁC review", "kind": "gate_human", "src": "§1"},
+      {"id": "ok", "label": "Phê duyệt", "kind": "ok", "src": "§1"},
+      {"id": "silent", "label": "Im lặng ≠ đồng ý", "kind": "note", "src": "§1"}
+    ],
+    "edges": [
+      {"from": "maker", "to": "art"}, {"from": "art", "to": "rev"},
+      {"from": "proof", "to": "rev", "label": "đính kèm"},
+      {"from": "rev", "to": "ok"}, {"from": "silent", "to": "ok"}
+    ],
+    "beats": [
+      {"say": "Ai làm ra sản phẩm thì không được tự chấm sản phẩm đó.", "reveal": ["maker", "art"]},
+      {"say": "Phải có một người khác nhìn vào, và nhìn vào bằng chứng chạy thật chứ không phải lời hứa.", "reveal": ["proof", "rev"]},
+      {"say": "Chỉ khi có phê duyệt rõ ràng mới đi tiếp. Im lặng không được tính là đồng ý.", "reveal": ["ok", "silent"]}
+    ]
+  },
+  {
+    "id": "b02", "title": "Sáu giai đoạn, giai đoạn sau chỉ bắt đầu khi giai đoạn trước qua cổng", "layout": "flow",
+    "nodes": [
+      {"id": "s1", "label": "1. Phân tích yêu cầu", "kind": "step", "src": "§4.1"},
+      {"id": "s2", "label": "2. Thiết kế", "kind": "step", "src": "§4.1"},
+      {"id": "s3", "label": "3. Phát triển", "kind": "step", "src": "§4.1"},
+      {"id": "s4", "label": "4. Kiểm thử", "kind": "step", "src": "§4.1"},
+      {"id": "s5", "label": "5. Nghiệm thu", "kind": "step", "src": "§4.1"},
+      {"id": "s6", "label": "6. Bàn giao & phát hành", "kind": "step", "src": "§4.1"}
+    ],
+    "edges": [
+      {"from": "s1", "to": "s2"}, {"from": "s2", "to": "s3"}, {"from": "s3", "to": "s4"},
+      {"from": "s4", "to": "s5"}, {"from": "s5", "to": "s6"}
+    ],
+    "beats": [
+      {"say": "Quy trình vẫn là sáu bước quen thuộc của phần mềm truyền thống.", "reveal": ["s1", "s2", "s3"]},
+      {"say": "Khác ở chỗ: mỗi bước chỉ mở cửa cho bước sau khi đã qua đủ cổng và review.", "reveal": ["s4", "s5", "s6"]}
+    ]
+  },
+  {
+    "id": "b03", "title": "Zoom vào một giai đoạn: Phát triển", "layout": "flow",
+    "groups": [{"id": "g3", "label": "Giai đoạn 3 · Phát triển"}],
+    "nodes": [
+      {"id": "dev", "label": "Developer giao việc", "kind": "actor", "group": "g3", "src": "§4.2"},
+      {"id": "ai", "label": "AI sinh code + unit test", "kind": "system", "group": "g3", "src": "§4.2"},
+      {"id": "ci", "label": "CI: build, lint, test, quét bảo mật", "kind": "gate_auto", "group": "g3", "src": "§4.2"},
+      {"id": "rev", "label": "Developer KHÁC review code", "kind": "gate_human", "group": "g3", "src": "§4.2"},
+      {"id": "next", "label": "Sang giai đoạn 4", "kind": "step", "src": "§4.1"}
+    ],
+    "edges": [
+      {"from": "dev", "to": "ai", "label": "giao việc"},
+      {"from": "ai", "to": "ci"},
+      {"from": "ci", "to": "ai", "label": "FAIL", "feedback": true},
+      {"from": "ci", "to": "rev", "label": "PASS"},
+      {"from": "rev", "to": "next"}
+    ],
+    "beats": [
+      {"say": "Mỗi giai đoạn đều có cùng ba lớp. Người giao việc, AI làm phần nặng.", "reveal": ["g3", "dev", "ai"]},
+      {"say": "Rồi CI chạy tự động, ngoài phiên làm việc của AI. FAIL là quay lại, không có ngoại lệ.", "reveal": ["ci"]},
+      {"say": "Chỉ khi PASS, mới đến lượt một người khác review. Người review không phải xử lý code còn lỗi build.", "reveal": ["rev", "next"]}
+    ]
+  },
+  {
+    "id": "b04", "title": "Hai loại cổng: cơ học và phán đoán", "layout": "tree",
+    "nodes": [
+      {"id": "root", "label": "Cổng kiểm soát", "kind": "step", "src": "§4.2"},
+      {"id": "mech", "label": "Cổng cơ học", "kind": "gate_auto", "src": "§4.2"},
+      {"id": "judg", "label": "Cổng phán đoán", "kind": "gate_human", "src": "§4.2"},
+      {"id": "m1", "label": "Chạy được là biết: build, lint, test", "kind": "note", "src": "§4.2"},
+      {"id": "m2", "label": "Chỉ cấu hình, không tự xây lại", "kind": "note", "src": "§4.2"},
+      {"id": "j1", "label": "Không đảo ngược: go/no-go, phát hành", "kind": "note", "src": "§4.2"},
+      {"id": "j2", "label": "Con người nhận rủi ro và ký duyệt", "kind": "note", "src": "§4.2"}
+    ],
+    "edges": [
+      {"from": "root", "to": "mech"}, {"from": "root", "to": "judg"},
+      {"from": "mech", "to": "m1"}, {"from": "mech", "to": "m2"},
+      {"from": "judg", "to": "j1"}, {"from": "judg", "to": "j2"}
+    ],
+    "beats": [
+      {"say": "Có hai loại cổng, và phải phân biệt rõ.", "reveal": ["root", "mech", "judg"]},
+      {"say": "Cổng cơ học: máy tự kiểm tra, mình chỉ cấu hình. FAIL ở CI là chặn thật.", "reveal": ["m1", "m2"]},
+      {"say": "Cổng phán đoán: chỉ giữ cho quyết định không thể đảo ngược, và luôn là con người ký.", "reveal": ["j1", "j2"]}
+    ]
+  },
+  {
+    "id": "b05", "title": "Ba điểm bắt buộc phải tách người", "layout": "flow",
+    "groups": [
+      {"id": "p1", "label": "#1 Đặc tả"}, {"id": "p3", "label": "#3 Code"}, {"id": "p6", "label": "#6 Phát hành"}
+    ],
+    "nodes": [
+      {"id": "w1", "label": "Người viết đặc tả", "kind": "actor", "group": "p1", "src": "§5"},
+      {"id": "r1", "label": "Nghiệp vụ xác nhận", "kind": "gate_human", "group": "p1", "src": "§5"},
+      {"id": "w3", "label": "Người viết code", "kind": "actor", "group": "p3", "src": "§5"},
+      {"id": "r3", "label": "Developer khác review", "kind": "gate_human", "group": "p3", "src": "§5"},
+      {"id": "w6", "label": "Người vận hành feature", "kind": "actor", "group": "p6", "src": "§5"},
+      {"id": "r6", "label": "Release Approver duyệt", "kind": "gate_human", "group": "p6", "src": "§5"}
+    ],
+    "edges": [
+      {"from": "w1", "to": "r1", "label": "khác người"},
+      {"from": "w3", "to": "r3", "label": "khác người"},
+      {"from": "w6", "to": "r6", "label": "khác người"}
+    ],
+    "beats": [
+      {"say": "Dù dự án nhỏ đến đâu, có ba chỗ không bao giờ được gộp một người.", "reveal": ["p1", "p3", "p6"]},
+      {"say": "Đặc tả: người viết khác người xác nhận.", "reveal": ["w1", "r1"]},
+      {"say": "Code: người viết khác người review.", "reveal": ["w3", "r3"]},
+      {"say": "Phát hành: người vận hành khác người phê duyệt.", "reveal": ["w6", "r6"]}
+    ]
+  },
+  {
+    "id": "b06", "title": "Con người ở lõi, AI và CI vây quanh", "layout": "nested",
+    "groups": [
+      {"id": "outer", "label": "Vành ngoài · Cổng cơ học"},
+      {"id": "mid", "label": "Vành trong · AI theo vai trò", "parent": "outer"},
+      {"id": "core", "label": "Lõi · Con người", "parent": "mid"}
+    ],
+    "nodes": [
+      {"id": "roles", "label": "6 vai trò", "kind": "actor", "group": "core", "src": "§12.1"},
+      {"id": "rv", "label": "7 điểm review", "kind": "gate_human", "group": "core", "src": "§12.1"},
+      {"id": "agent", "label": "Trợ lý AI được duyệt", "kind": "system", "group": "mid", "src": "§12.1"},
+      {"id": "ci", "label": "CI/CD, test, quét bảo mật", "kind": "gate_auto", "group": "outer", "src": "§12.1"}
+    ],
+    "edges": [],
+    "beats": [
+      {"say": "Đặt con người ở giữa. Mọi quyết định và trách nhiệm cuối cùng nằm ở đây.", "reveal": ["outer", "mid", "core", "roles", "rv"]},
+      {"say": "Quanh họ là AI, mỗi vai trò một trợ lý. AI tăng sản lượng nhưng không ký, không tự merge.", "reveal": ["agent"]},
+      {"say": "Ngoài cùng là cổng cơ học. Chỉ sản phẩm đã PASS mới được đưa tới người review.", "reveal": ["ci"]}
+    ]
+  },
+  {
+    "id": "b07", "title": "Năng lực giám sát là cái trần của cả hệ thống", "layout": "flow",
+    "nodes": [
+      {"id": "ai", "label": "AI nhân khối lượng output", "kind": "system", "src": "§8"},
+      {"id": "rv", "label": "Khả năng review KHÔNG nhân theo", "kind": "gate_human", "src": "§8"},
+      {"id": "cap", "label": "Trần = người review × giờ review", "kind": "note", "src": "§8.1"},
+      {"id": "ok", "label": "≤ 2 dự án / người: Bình thường", "kind": "ok", "src": "§8.2"},
+      {"id": "warn", "label": "3–4 dự án: Căng, phải phân tuyến", "kind": "warn", "src": "§8.2"},
+      {"id": "stop", "label": "> 4 dự án: Vượt trần, dừng nhận việc", "kind": "stop", "src": "§8.2"}
+    ],
+    "edges": [
+      {"from": "ai", "to": "rv"}, {"from": "rv", "to": "cap"},
+      {"from": "cap", "to": "ok"}, {"from": "cap", "to": "warn"}, {"from": "cap", "to": "stop"}
+    ],
+    "beats": [
+      {"say": "AI làm output tăng gấp nhiều lần, nhưng khả năng review của con người thì không tăng theo.", "reveal": ["ai", "rv"]},
+      {"say": "Nên số người review giỏi, nhân với số giờ họ có, chính là cái trần thật của hệ thống.", "reveal": ["cap"]},
+      {"say": "Vì vậy phải đo, và giới hạn số dự án song song trên mỗi người review.", "reveal": ["ok", "warn", "stop"]}
+    ]
+  },
+  {
+    "id": "b08", "title": "Ma trận quyết định H1 × H2", "layout": "matrix",
+    "cols": ["H2 đúng (gate có sẵn)", "H2 chưa đúng"],
+    "rows": ["H1 đúng", "H1 chưa đúng"],
+    "nodes": [
+      {"id": "a", "label": "Mặc định: 1 người + 1 AI, gate có sẵn", "kind": "ok", "cell": [0, 0], "src": "§10.3"},
+      {"id": "b", "label": "Tự xây thư viện gate, làm CI trước", "kind": "warn", "cell": [0, 1], "src": "§10.3"},
+      {"id": "c", "label": "Chia nhỏ task, phối hợp nhiều công cụ", "kind": "warn", "cell": [1, 0], "src": "§10.3"},
+      {"id": "d", "label": "Chưa nhân rộng: quay về thí điểm chặt", "kind": "stop", "cell": [1, 1], "src": "§10.3"}
+    ],
+    "beats": [
+      {"say": "Hai giả thuyết, mỗi cái đúng hoặc sai, cho bốn cách vận hành.", "reveal": ["a"]},
+      {"say": "Nếu gate chưa có sẵn thì phải tự xây, bắt đầu từ CI.", "reveal": ["b"]},
+      {"say": "Nếu một công cụ chưa làm trọn feature thì chia nhỏ việc ra.", "reveal": ["c"]},
+      {"say": "Nếu cả hai chưa đúng thì chưa nhân rộng, quay lại thí điểm chặt.", "reveal": ["d"]}
+    ]
+  },
+  {
+    "id": "b09", "title": "Tổ chức đội 30 người", "layout": "tree",
+    "nodes": [
+      {"id": "head", "label": "Head of Delivery (1)", "kind": "actor", "src": "§12.2"},
+      {"id": "shared", "label": "Khối dùng chung (5)", "kind": "gate_human", "src": "§12.2"},
+      {"id": "pods", "label": "4 Pod giao hàng (24)", "kind": "system", "src": "§12.2"},
+      {"id": "s1", "label": "Chief Architect · QA Lead trưởng", "kind": "note", "src": "§12.2"},
+      {"id": "s2", "label": "Security · Enablement · Release Approver", "kind": "note", "src": "§12.2"},
+      {"id": "pod", "label": "Mỗi Pod: BA + Tech Lead + 3 Dev + QA", "kind": "note", "src": "§12.2"}
+    ],
+    "edges": [
+      {"from": "head", "to": "shared"}, {"from": "head", "to": "pods"},
+      {"from": "shared", "to": "s1"}, {"from": "shared", "to": "s2"},
+      {"from": "pods", "to": "pod"}
+    ],
+    "beats": [
+      {"say": "Một người điều hành, giữ độc lập: không review feature, chỉ chủ trì năng lực giám sát.", "reveal": ["head"]},
+      {"say": "Một khối dùng chung năm người giữ các điểm review mức Cao, độc lập với mọi Pod.", "reveal": ["shared", "s1", "s2"]},
+      {"say": "Bốn Pod, mỗi Pod sáu người, tự đủ để chạy review mức Trung bình.", "reveal": ["pods", "pod"]}
+    ]
+  },
+  {
+    "id": "b10", "title": "DDSA: tự động hoá là bước cuối cùng", "layout": "flow",
+    "nodes": [
+      {"id": "d1", "label": "1. Delete: xoá bỏ", "kind": "stop", "src": "§13.3"},
+      {"id": "d2", "label": "2. Delegate: uỷ quyền cho AI", "kind": "system", "src": "§13.3"},
+      {"id": "d3", "label": "3. Simplify: đơn giản hoá", "kind": "actor", "src": "§13.3"},
+      {"id": "d4", "label": "4. Automate: tự động hoá", "kind": "gate_auto", "src": "§13.3"},
+      {"id": "warn", "label": "Tự động hoá sớm chỉ nhân rộng lãng phí", "kind": "note", "src": "§13.3"}
+    ],
+    "edges": [
+      {"from": "d1", "to": "d2"}, {"from": "d2", "to": "d3"}, {"from": "d3", "to": "d4"},
+      {"from": "warn", "to": "d4"}
+    ],
+    "beats": [
+      {"say": "Muốn đưa một việc vào AI, đi đúng thứ tự. Đầu tiên là xoá những gì lỗi thời.", "reveal": ["d1"]},
+      {"say": "Rồi giao phần AI làm được, giữ lại điểm review của người. Sau đó rút gọn.", "reveal": ["d2", "d3"]},
+      {"say": "Tự động hoá là bước cuối. Làm sớm thì chỉ nhân bản sự lãng phí.", "reveal": ["d4", "warn"]}
+    ]
+  }
+]
